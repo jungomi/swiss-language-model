@@ -523,9 +523,7 @@ def run(gpu_id, options, distributed=False):
     ]
     optimiser = AdamW(optimiser_grouped_parameters, lr=initial_lr, eps=options.adam_eps)
     lr_scheduler = WarmupLinearSchedule(
-        optimiser,
-        warmup_steps=options.lr_warmup,
-        t_total=len(train_dataset) * options.num_epochs,
+        optimiser, warmup_steps=options.lr_warmup, t_total=options.num_epochs
     )
 
     if distributed:
