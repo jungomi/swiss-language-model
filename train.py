@@ -423,6 +423,8 @@ def run(gpu_id, options, distributed=False):
     device = torch.device("cuda" if use_cuda else "cpu")
     logger = Logger(options.name) if gpu_id == 0 else Noop()
 
+    logger.start("Initialising", spinner=True, prefix=False)
+
     tokeniser = BertTokenizer.from_pretrained(options.pre_trained)
 
     train_dataset = TextDataset(options.train_file, tokeniser)
@@ -568,6 +570,13 @@ def run(gpu_id, options, distributed=False):
         options=options,
     )
     logger.log_experiment(experiment)
+
+    # Wait for all processes to load eveything before starting training.
+    # Not strictly necessary, since they will wait once the actual model is run, but
+    # this makes it nicer to show the spinner until all of them are ready.
+    if distributed:
+        torch.distributed.barrier()
+    logger.end("Initialising", spinner=True, prefix=False)
 
     train(
         logger,
