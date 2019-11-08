@@ -224,8 +224,18 @@ def train(
         logger.end("Log Best Checkpoint", spinner=True)
 
         time_difference = time.time() - start_time
-        epoch_results = [OrderedDict(name="Train", loss=train_result["loss"])] + [
-            OrderedDict(name=val_result["name"], loss=val_result["loss"])
+        epoch_results = [
+            OrderedDict(
+                name="Train",
+                loss=train_result["loss"],
+                perplexity=train_result["perplexity"],
+            )
+        ] + [
+            OrderedDict(
+                name=val_result["name"],
+                loss=val_result["loss"],
+                perplexity=val_result["perplexity"],
+            )
             for val_result in validation_results
         ]
         logger.log_epoch_stats(
@@ -497,9 +507,17 @@ def run(gpu_id, options, distributed=False):
         resume_text = "Resuming from - Epoch {epoch}".format(epoch=checkpoint["epoch"])
         logger.set_prefix(resume_text)
         epoch_results = [
-            OrderedDict(name="Train", loss=checkpoint["train"]["loss"][-1])
+            OrderedDict(
+                name="Train",
+                loss=checkpoint["train"]["loss"][-1],
+                perplexity=checkpoint["train"]["perplexity"][-1],
+            )
         ] + [
-            OrderedDict(name=val_name, loss=val_result["loss"][-1])
+            OrderedDict(
+                name=val_name,
+                loss=val_result["loss"][-1],
+                perplexity=val_result["perplexity"][-1],
+            )
             for val_name, val_result in checkpoint["validation"].items()
         ]
         logger.log_epoch_stats(epoch_results, metrics)
