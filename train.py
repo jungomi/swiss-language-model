@@ -247,15 +247,15 @@ def train(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--train-file",
-        dest="train_file",
+        "--train-text",
+        dest="train_text",
         required=True,
         type=str,
         help="Path to text file for training",
     )
     parser.add_argument(
-        "--validation-file",
-        dest="validation_file",
+        "--validation-text",
+        dest="validation_text",
         required=True,
         nargs="+",
         metavar="[NAME=]PATH",
@@ -427,7 +427,7 @@ def run(gpu_id, options, distributed=False):
 
     tokeniser = BertTokenizer.from_pretrained(options.pre_trained)
 
-    train_dataset = TextDataset(options.train_file, tokeniser)
+    train_dataset = TextDataset(options.train_text, tokeniser)
     train_sampler = (
         DistributedSampler(train_dataset, num_replicas=options.num_gpus, rank=gpu_id)
         if distributed
@@ -444,7 +444,7 @@ def run(gpu_id, options, distributed=False):
     )
 
     validation_data_loaders = []
-    for val_file in options.validation_file:
+    for val_file in options.validation_text:
         vals = val_file.split("=", 1)
         if len(vals) > 1:
             # Remove whitespace around the name
