@@ -397,9 +397,7 @@ def main():
         os.environ["MASTER_PORT"] = "12345"
         # Manullay adjust the batch size and workers to split amongst the processes.
         options.batch_size = options.batch_size // options.num_gpus
-        options.num_workers = (
-            options.num_workers + options.num_gpus - 1
-        ) // options.num_gpus
+        options.num_workers = options.num_workers // options.num_gpus
         mp.spawn(run, nprocs=options.num_gpus, args=(options, True))
     else:
         run(0, options)
