@@ -24,6 +24,7 @@ from transformers import (
 from checkpoint import Logger, Noop, default_checkpoint, load_checkpoint, metrics
 from dataset import TextDataset, mask_tokens
 
+
 batch_size = 1
 num_workers = multiprocessing.cpu_count()
 num_gpus = torch.cuda.device_count()
@@ -379,6 +380,12 @@ def main():
     if use_cuda:
         # Somehow this fixes an unknown error on Windows.
         torch.cuda.current_device()
+
+    # Get rid of the annoying warnings about TensorFlow not being compiled with
+    # certain CPU instructions.
+    # TensorFlow is not even used, but because transformers uses it besides PyTorch
+    # there are constant warnings being spammed.
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
     if use_cuda and options.num_gpus > 1:
         os.environ["MASTER_ADDR"] = "localhost"
