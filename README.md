@@ -27,7 +27,7 @@ with PyTorch follow the instructions on
 Training is done with the `train.py` script:
 
 ```sh
-python train.py --name some-name -c log/some-name/checkpoints/0022.pth --train-text /path/to/text.tsv --validation-text /path/to/text.tsv
+python train.py --name some-name -c log/some-name/checkpoints/0022/ --train-text /path/to/text.tsv --validation-text /path/to/text.tsv
 ```
 
 The `--name` option is used to give it a name, otherwise the checkpoints are

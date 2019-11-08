@@ -133,6 +133,7 @@ def train(
         )
     )
 
+    tokeniser = train_data_loader.dataset.tokeniser  # type: ignore
     for epoch in range(num_epochs):
         actual_epoch = start_epoch + epoch + 1
         epoch_text = "[{current:>{pad}}/{end}] Epoch {epoch}".format(
@@ -189,33 +190,27 @@ def train(
         train_stats["lr"].append(epoch_lr)
 
         logger.start("Checkpoint", spinner=True)
+        # Multi-gpu models wrap the original model. To make the checkpoint compatible
+        # with the original model, the state dict of .module is saved.
+        model_unwrapped = (
+            model.module if isinstance(model, DistributedDataParallel) else model
+        )
         logger.save_checkpoint(
-            OrderedDict(
+            model_unwrapped,
+            tokeniser,
+            checkpoint=OrderedDict(
                 epoch=actual_epoch,
                 train=train_stats,
                 validation=validation_results_dict,
                 outdated_validation=outdated_validations,
-                # Multi-gpu models wrap the original model. To make the checkpoint
-                # compatible with the original model, the state dict of .module is
-                # saved.
-                model=OrderedDict(
-                    kind=model_kind,
-                    state=(
-                        model.module.state_dict()
-                        if isinstance(model, DistributedDataParallel)
-                        else model.state_dict()
-                    ),
-                ),
-            )
+                model=OrderedDict(kind=model_kind),
+            ),
         )
         logger.end("Checkpoint", spinner=True)
 
         logger.start("Tensorboard", spinner=True)
         logger.write_tensorboard(
-            actual_epoch,
-            train_result,
-            validation_results,
-            (model.module if isinstance(model, DistributedDataParallel) else model),
+            actual_epoch, train_result, validation_results, model_unwrapped
         )
         logger.end("Tensorboard", spinner=True)
 
@@ -425,7 +420,16 @@ def run(gpu_id, options, distributed=False):
 
     logger.start("Initialising", spinner=True, prefix=False)
 
-    tokeniser = BertTokenizer.from_pretrained(options.pre_trained)
+    checkpoint = (
+        default_checkpoint
+        if options.checkpoint is None
+        else load_checkpoint(os.path.join(options.checkpoint, "stats.pth"))
+    )
+    # Either use the checkpoint directory as the configuration or use one of the
+    # available pre-trained models.
+    pre_trained = options.checkpoint or options.pre_trained
+
+    tokeniser = BertTokenizer.from_pretrained(pre_trained)
 
     train_dataset = TextDataset(options.train_text, tokeniser)
     train_sampler = (
@@ -474,15 +478,7 @@ def run(gpu_id, options, distributed=False):
         )
         validation_data_loaders.append(validation_data_loader)
 
-    checkpoint = None
-    model_kind = options.model_kind
-
     initial_lr = options.lr
-    checkpoint = (
-        default_checkpoint
-        if options.checkpoint is None
-        else load_checkpoint(options.checkpoint)
-    )
     # Only restore the learning rate if resuming from a checkpoint and not manually
     # resetting the learning rate.
     if len(checkpoint["train"]["lr"]) > 0 and not options.reset_lr:
@@ -493,9 +489,10 @@ def run(gpu_id, options, distributed=False):
     if distributed and gpu_id != 0:
         torch.distributed.barrier()
 
+    model_kind = checkpoint["model"].get("kind") or options.model_kind
     if model_kind == "bert":
-        config = BertConfig.from_pretrained(options.pre_trained)
-        model = BertForMaskedLM.from_pretrained(options.pre_trained, config=config)
+        config = BertConfig.from_pretrained(pre_trained)
+        model = BertForMaskedLM.from_pretrained(pre_trained, config=config)
     else:
         raise Exception("No model available for {}".format(model_kind))
     model = model.to(device)
@@ -504,25 +501,6 @@ def run(gpu_id, options, distributed=False):
     # version.
     if distributed and gpu_id == 0:
         torch.distributed.barrier()
-
-    if options.checkpoint is not None:
-        resume_text = "Resuming from - Epoch {epoch}".format(epoch=checkpoint["epoch"])
-        logger.set_prefix(resume_text)
-        epoch_results = [
-            OrderedDict(
-                name="Train",
-                loss=checkpoint["train"]["loss"][-1],
-                perplexity=checkpoint["train"]["perplexity"][-1],
-            )
-        ] + [
-            OrderedDict(
-                name=val_name,
-                loss=val_result["loss"][-1],
-                perplexity=val_result["perplexity"][-1],
-            )
-            for val_name, val_result in checkpoint["validation"].items()
-        ]
-        logger.log_epoch_stats(epoch_results, metrics)
 
     no_decay = ["bias", "LayerNorm.weight"]
     optimiser_grouped_parameters = [
@@ -577,6 +555,25 @@ def run(gpu_id, options, distributed=False):
     if distributed:
         torch.distributed.barrier()
     logger.end("Initialising", spinner=True, prefix=False)
+
+    if options.checkpoint is not None:
+        resume_text = "Resuming from - Epoch {epoch}".format(epoch=checkpoint["epoch"])
+        logger.set_prefix(resume_text)
+        epoch_results = [
+            OrderedDict(
+                name="Train",
+                loss=checkpoint["train"]["loss"][-1],
+                perplexity=checkpoint["train"]["perplexity"][-1],
+            )
+        ] + [
+            OrderedDict(
+                name=val_name,
+                loss=val_result["loss"][-1],
+                perplexity=val_result["perplexity"][-1],
+            )
+            for val_name, val_result in checkpoint["validation"].items()
+        ]
+        logger.log_epoch_stats(epoch_results, metrics)
 
     train(
         logger,

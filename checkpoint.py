@@ -12,14 +12,14 @@ import torch.nn as nn
 from halo import Halo
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+from transformers import BertForMaskedLM, BertTokenizer
 
 default_checkpoint = {
     "epoch": 0,
     "train": {"lr": [], "loss": [], "perplexity": []},
     "validation": {},
     "outdated_validation": [],
-    "vocabulary": [],
-    "model": {"kind": None, "state": None},
+    "model": {"kind": None},
 }
 
 metrics = [
@@ -28,16 +28,6 @@ metrics = [
 ]
 
 repo_path = os.path.dirname(os.path.abspath(__file__))
-
-
-def save_checkpoint(checkpoint: Dict, base_dir: str = "./checkpoints", name: str = ""):
-    cp_dir = os.path.join(base_dir, name)
-    # Padded to 4 digits because of lexical sorting of numbers.
-    # e.g. 0009.pth
-    filename = "{num:0>4}.pth".format(num=checkpoint["epoch"])
-    if not os.path.exists(cp_dir):
-        os.makedirs(cp_dir)
-    torch.save(checkpoint, os.path.join(cp_dir, filename))
 
 
 # By default it loads it on the CPU, because it usually doesn't need to be on the GPU as
@@ -163,7 +153,7 @@ class Logger(object):
                             break
                         fd.write(
                             (
-                                "{i}. log/{name}/checkpoints/{num:0>4}.pth "
+                                "{i}. log/{name}/checkpoints/{num:0>4}/ "
                                 "- {value:.5f}\n"
                             ).format(
                                 i=i + 1,
@@ -231,11 +221,18 @@ class Logger(object):
                 fd.write(diff)
                 fd.write("```\n")
 
-    def save_checkpoint(self, checkpoint: Dict):
+    def save_checkpoint(
+        self, model: BertForMaskedLM, tokeniser: BertTokenizer, checkpoint: Dict
+    ):
         # Padded to 4 digits because of lexical sorting of numbers.
-        # e.g. 0009.pth
-        filename = "{num:0>4}.pth".format(num=checkpoint["epoch"])
-        torch.save(checkpoint, os.path.join(self.checkpoint_dir, filename))
+        # e.g. 0009
+        dir_num = "{num:0>4}".format(num=checkpoint["epoch"])
+        out_dir = os.path.join(self.checkpoint_dir, dir_num)
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+        model.save_pretrained(out_dir)
+        tokeniser.save_pretrained(out_dir)
+        torch.save(checkpoint, os.path.join(out_dir, "stats.pth"))
 
     def write_tensorboard(
         self,
