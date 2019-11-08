@@ -148,9 +148,9 @@ class Logger(object):
                 for metric in criterion:
                     fd.write("\n")
                     fd.write("### {}\n\n".format(metric["name"]))
-                    crit = result["criterion"]
+                    crit = result
                     for key in metric["key"].split("."):
-                        crit = getattr(crit, key)
+                        crit = crit[key]
                     values = torch.tensor(crit)
                     descending = metric["order"] == "max"
                     sorted_values, sorted_indices = torch.sort(
