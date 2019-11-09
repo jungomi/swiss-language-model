@@ -83,7 +83,7 @@ class TextDataset(Dataset):
             tokenised_ids: List[int] = []
             for line in reader:
                 tokenised_ids.extend(
-                    tokeniser.convert_tokens_to_ids(tokeniser.tokenize(line[1]))
+                    tokeniser.convert_tokens_to_ids(tokeniser.tokenize(line[0]))
                 )
         self.text_blocks: List[int] = []
         # Group into blocks of text, discarding the last incomplete text.
