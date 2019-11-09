@@ -3,7 +3,7 @@ import multiprocessing
 import os
 import time
 from collections import OrderedDict
-from typing import Dict, Optional
+from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -23,6 +23,13 @@ from transformers import (
 
 from checkpoint import Logger, Noop, default_checkpoint, load_checkpoint, metrics
 from dataset import TextDataset, mask_tokens
+
+try:
+    from apex import amp
+
+    HAS_APEX = True
+except ImportError:
+    HAS_APEX = False
 
 
 batch_size = 1
@@ -47,6 +54,7 @@ def run_epoch(
     logger: Logger,
     epoch: int,
     train: bool = True,
+    mixed_precision: bool = False,
     name: str = "",
 ) -> Dict:
     # Disables autograd during validation mode
@@ -79,9 +87,15 @@ def run_epoch(
             breakpoint()
         if train:
             optimiser.zero_grad()
-            loss.backward()
-            # Clip gradients to avoid exploding gradients
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            if mixed_precision:
+                with amp.scale_loss(loss, optimiser) as scaled_loss:
+                    scaled_loss.backward()
+                # Clip gradients to avoid exploding gradients
+                nn.utils.clip_grad_norm_(amp.master_params(optimiser), max_norm=1.0)
+            else:
+                loss.backward()
+                # Clip gradients to avoid exploding gradients
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimiser.step()
 
         logger.progress_step(
@@ -108,7 +122,7 @@ def train(
     checkpoint: Dict,
     num_epochs: int = num_epochs,
     model_kind: str = default_model,
-    sample_image: Optional[str] = None,
+    mixed_precision: bool = False,
 ):
     start_epoch = checkpoint["epoch"]
     train_stats = checkpoint["train"]
@@ -156,6 +170,7 @@ def train(
             train=True,
             name="Train",
             logger=logger,
+            mixed_precision=mixed_precision,
         )
         train_stats["loss"].append(train_result["loss"])
         train_stats["perplexity"].append(train_result["perplexity"])
@@ -176,6 +191,7 @@ def train(
                 train=False,
                 name=val_text,
                 logger=logger,
+                mixed_precision=mixed_precision,
             )
             validation_result["name"] = val_name
             validation_results.append(validation_result)
@@ -374,6 +390,16 @@ def parse_args() -> argparse.Namespace:
         choices=["bert"],
         help="Which kind of model to use [Default: {}]".format(default_model),
     )
+    parser.add_argument(
+        "-O",
+        "--opt-level",
+        dest="opt_level",
+        choices=["0", "1", "2", "3"],
+        help=(
+            "Optimisation level for mixed precision training. "
+            "See https://nvidia.github.io/apex/amp.html for details."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -524,6 +550,14 @@ def run(gpu_id, options, distributed=False):
         optimiser, warmup_steps=options.lr_warmup, t_total=options.num_epochs
     )
 
+    if options.opt_level is not None:
+        assert (
+            HAS_APEX
+        ), "Mixed precision training requires Apex: https://www.github.com/nvidia/apex"
+        model, optimiser = amp.initialize(
+            model, optimiser, opt_level="O{}".format(options.opt_level), verbosity=0
+        )
+
     if distributed:
         model = DistributedDataParallel(
             model, device_ids=[gpu_id], find_unused_parameters=True
@@ -582,6 +616,7 @@ def run(gpu_id, options, distributed=False):
         num_epochs=options.num_epochs,
         checkpoint=checkpoint,
         model_kind=model_kind,
+        mixed_precision=options.opt_level is not None,
     )
 
 

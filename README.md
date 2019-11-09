@@ -19,6 +19,23 @@ If you'd like to use a different installation method or another CUDA version
 with PyTorch follow the instructions on
 [PyTorch - Getting Started][pytorch-started].
 
+### Apex - Mixed Precision Training (Optional)
+
+For mixed precision training (f16) [Apex][apex] needs to be installed:
+
+```sh
+git clone https://github.com/NVIDIA/apex
+cd apex
+pip install -v --user --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+```
+
+Then the `-O`/`--opt-level` can be set to use the different optimisation levels.
+
+- O0: No optimisations (f32)
+- O1: Mixed precision (Recommended)
+- O2: Almost f16 but still mixed precision
+- O3: Full f16 (Almost guaranteed to lose accuracy)
+
 
 ## Usage
 
@@ -46,7 +63,6 @@ found in `log/` and is grouped by the experiment name.
 - Top 5 Checkpoints
 - TensorBoard
 - Event logs
-- Sample
 
 Even though they are grouped by the experiment, TensorBoard automatically finds
 all of them, therefore it can be run with:
@@ -55,6 +71,7 @@ all of them, therefore it can be run with:
 tensorboard --logdir log
 ```
 
+[apex]: https://github.com/nvidia/apex
 [arxiv-bert]: https://arxiv.org/abs/1810.04805
 [pytorch]: https://pytorch.org/
 [pytorch-started]: https://pytorch.org/get-started/locally/
