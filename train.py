@@ -267,9 +267,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--validation-text",
         dest="validation_text",
-        required=True,
         nargs="+",
         metavar="[NAME=]PATH",
+        default=[],
         type=str,
         help=(
             "List of text files validation. "
