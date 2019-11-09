@@ -6,3 +6,4 @@ halo==0.0.28
 tensorboard==2.0.0
 transformers==2.1.1
 scikit-learn==0.21.3
+sentencepiece==0.1.83
