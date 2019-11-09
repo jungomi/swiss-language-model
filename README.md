@@ -2,7 +2,13 @@
 
 A language model for Swiss German.
 
-Using [BERT][arxiv-bert]
+Using [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding][arxiv-bert]
+pre-trained on [cased German text by Deepset.ai][bert-german], which included:
+German Wikipedia dump (6GB of raw txt files), the OpenLegalData dump (2.4 GB)
+and news articles (3.6 GB)
+
+The model is then fine tuned on the Swiss German data of the
+[Leipzig Corpora Collection][leipzig-corpora].
 
 ## Requirements
 
@@ -73,5 +79,7 @@ tensorboard --logdir log
 
 [apex]: https://github.com/nvidia/apex
 [arxiv-bert]: https://arxiv.org/abs/1810.04805
+[bert-german]: https://deepset.ai/german-bert
+[leipzig-corpora]: https://wortschatz.uni-leipzig.de/en/download/
 [pytorch]: https://pytorch.org/
 [pytorch-started]: https://pytorch.org/get-started/locally/
