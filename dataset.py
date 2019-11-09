@@ -77,7 +77,9 @@ class TextDataset(Dataset):
             self.name = name
 
         with open(path, "r") as fd:
-            reader = csv.reader(fd, delimiter="\t", quoting=csv.QUOTE_NONE)
+            reader = csv.reader(
+                fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+            )
             tokenised_ids: List[int] = []
             for line in reader:
                 tokenised_ids.extend(
