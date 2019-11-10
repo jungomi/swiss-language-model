@@ -56,6 +56,7 @@ class TextDataset(Dataset):
         path: str,
         tokeniser: PreTrainedTokenizer,
         use_special: bool = True,
+        add_space: bool = False,
         block_size: int = 512,
         name: Optional[str] = None,
     ):
@@ -66,6 +67,10 @@ class TextDataset(Dataset):
             use_special (bool, optional): Whether the tokeniser uses speical tokens.
                 Mainly to avoid getting spammed by warnings.
                 [Default: True]
+            add_space (bool, optional): Whether the tokeniser adds a space at the
+                beginning for the encoding. Some models (e.g. GPT-2 and RoBERTa) need
+                that to correctly encode the first word.
+                [Default: False]
             block_size (int, optional): Size of the blocks of text [Default: 512]
             name (string, optional): Name of the dataset
                 [Default: Name of the ground truth file and its parent directory]
@@ -87,7 +92,7 @@ class TextDataset(Dataset):
             tokenised_ids: List[int] = []
             for line in reader:
                 tokenised_ids.extend(
-                    tokeniser.convert_tokens_to_ids(tokeniser.tokenize(line[0]))
+                    tokeniser.encode(line[0], add_prefix_space=add_space)
                 )
         self.text_blocks: List[List[int]] = []
         # Group into blocks of text, discarding the last incomplete text.
