@@ -52,6 +52,29 @@ Then the `-O`/`--opt-level` can be set to use the different optimisation levels.
 
 ## Usage
 
+### Data
+
+Data for training essentially raw text files, but since the Leipzig corpus uses
+a TSV style, that has been kept, but instead of the second column containing the
+sentences (first one in Leipzig corpus is the index), it is now the first one.
+This means you can add more columns after the first one, if you have a dataset
+that needs additional labels (e.g. for sentiment of the sentence) or just any
+additional information that will be ignored during training.
+
+The Leipzig corpus can be converted with `prepare_data.py`:
+
+```sh
+python prepare_data.py -i data/leipzig.tsv -o leipzig-converted --split 80
+```
+
+`-o`/`--output` is the output directory for all the generated data. If not
+given, it will be generated to `data/<basename-of-input-file>`, which would be
+`data/leipzig/` in this example.
+`--split` optionally generates a training validation split (80/20 in this case)
+additionally to the full data.
+You can also generate a vocabulary, SentencePiece and WordPiece (BERT's style)
+from the input by supplying the `--vocab` flag.
+
 ### Training
 
 Training is done with the `train.py` script:
