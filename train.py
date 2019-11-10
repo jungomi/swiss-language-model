@@ -19,6 +19,9 @@ from transformers import (
     BertForMaskedLM,
     BertTokenizer,
     WarmupLinearSchedule,
+    GPT2Config,
+    GPT2LMHeadModel,
+    GPT2Tokenizer,
 )
 
 from checkpoint import Logger, Noop, default_checkpoint, load_checkpoint, metrics
@@ -43,7 +46,6 @@ weight_decay = 0.0
 seed = 1234
 default_model = "bert"
 default_name = "default"
-pre_trained = "bert-base-german-cased"
 
 
 def run_epoch(
@@ -55,6 +57,7 @@ def run_epoch(
     epoch: int,
     train: bool = True,
     mixed_precision: bool = False,
+    masked_lm: bool = True,
     name: str = "",
 ) -> Dict:
     # Disables autograd during validation mode
@@ -76,11 +79,16 @@ def run_epoch(
     logger.progress_start(name, total=len(data_loader.dataset))
     tokeniser = data_loader.dataset.tokeniser  # type: ignore
     for d in data_loader:
-        inputs, labels = mask_tokens(d.to(device), tokeniser)
+        d = d.to(device)
+        inputs, labels = mask_tokens(d, tokeniser) if masked_lm else (d, d)
         # The last batch may not be a full batch
         curr_batch_size = inputs.size(0)
 
-        output = model(inputs, masked_lm_labels=labels)
+        output = (
+            model(inputs, masked_lm_labels=labels)
+            if masked_lm
+            else model(inputs, labels=labels)
+        )
         loss = output[0]
         losses.append(loss.item())
         if torch.isnan(loss) or torch.isinf(loss):
@@ -123,6 +131,7 @@ def train(
     num_epochs: int = num_epochs,
     model_kind: str = default_model,
     mixed_precision: bool = False,
+    masked_lm: bool = True,
 ):
     start_epoch = checkpoint["epoch"]
     train_stats = checkpoint["train"]
@@ -171,6 +180,7 @@ def train(
             name="Train",
             logger=logger,
             mixed_precision=mixed_precision,
+            masked_lm=masked_lm,
         )
         train_stats["loss"].append(train_result["loss"])
         train_stats["perplexity"].append(train_result["perplexity"])
@@ -192,6 +202,7 @@ def train(
                 name=val_text,
                 logger=logger,
                 mixed_precision=mixed_precision,
+                masked_lm=masked_lm,
             )
             validation_result["name"] = val_name
             validation_results.append(validation_result)
@@ -279,9 +290,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pre-trained",
         dest="pre_trained",
-        default=pre_trained,
         type=str,
-        help="Which pre-trained model to use [Default: {}]".format(pre_trained),
+        help="Which pre-trained model to use",
     )
     parser.add_argument(
         "-n",
@@ -387,7 +397,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         dest="model_kind",
         default=default_model,
-        choices=["bert"],
+        choices=["bert", "gpt2"],
         help="Which kind of model to use [Default: {}]".format(default_model),
     )
     parser.add_argument(
@@ -453,9 +463,38 @@ def run(gpu_id, options, distributed=False):
     # available pre-trained models.
     pre_trained = options.checkpoint or options.pre_trained
 
-    tokeniser = BertTokenizer.from_pretrained(pre_trained)
+    # All but the primary GPU wait here, so that only the primary process loads the
+    # pre-trained model and the rest uses the cached version.
+    if distributed and gpu_id != 0:
+        torch.distributed.barrier()
 
-    train_dataset = TextDataset(options.train_text, tokeniser)
+    model_kind = checkpoint["model"].get("kind") or options.model_kind
+    use_special = True
+    masked_lm = True
+    if model_kind == "bert":
+        if pre_trained is None:
+            pre_trained = "bert-base-german-cased"
+        config = BertConfig.from_pretrained(pre_trained)
+        model = BertForMaskedLM.from_pretrained(pre_trained, config=config)
+        tokeniser = BertTokenizer.from_pretrained(pre_trained)
+    elif model_kind == "gpt2":
+        if pre_trained is None:
+            pre_trained = "gpt2"
+        config = GPT2Config.from_pretrained(pre_trained)
+        model = GPT2LMHeadModel.from_pretrained(pre_trained, config=config)
+        tokeniser = GPT2Tokenizer.from_pretrained(pre_trained)
+        masked_lm = False
+        use_special = False
+    else:
+        raise Exception("No model available for {}".format(model_kind))
+    model = model.to(device)
+
+    # Primary process has loaded the model and the other can now load the cached
+    # version.
+    if distributed and gpu_id == 0:
+        torch.distributed.barrier()
+
+    train_dataset = TextDataset(options.train_text, tokeniser, use_special=use_special)
     train_sampler = (
         DistributedSampler(train_dataset, num_replicas=options.num_gpus, rank=gpu_id)
         if distributed
@@ -483,7 +522,9 @@ def run(gpu_id, options, distributed=False):
         else:
             name = None
             file_path = vals[0]
-        validation_dataset = TextDataset(file_path, tokeniser, name=name)
+        validation_dataset = TextDataset(
+            file_path, tokeniser, name=name, use_special=use_special
+        )
         validation_sampler = (
             DistributedSampler(
                 validation_dataset, num_replicas=options.num_gpus, rank=gpu_id
@@ -507,24 +548,6 @@ def run(gpu_id, options, distributed=False):
     # resetting the learning rate.
     if len(checkpoint["train"]["lr"]) > 0 and not options.reset_lr:
         initial_lr = checkpoint["train"]["lr"][-1]
-
-    # All but the primary GPU wait here, so that only the primary process loads the
-    # pre-trained model and the rest uses the cached version.
-    if distributed and gpu_id != 0:
-        torch.distributed.barrier()
-
-    model_kind = checkpoint["model"].get("kind") or options.model_kind
-    if model_kind == "bert":
-        config = BertConfig.from_pretrained(pre_trained)
-        model = BertForMaskedLM.from_pretrained(pre_trained, config=config)
-    else:
-        raise Exception("No model available for {}".format(model_kind))
-    model = model.to(device)
-
-    # Primary process has loaded the model and the other can now load the cached
-    # version.
-    if distributed and gpu_id == 0:
-        torch.distributed.barrier()
 
     no_decay = ["bias", "LayerNorm.weight"]
     optimiser_grouped_parameters = [
@@ -617,6 +640,7 @@ def run(gpu_id, options, distributed=False):
         checkpoint=checkpoint,
         model_kind=model_kind,
         mixed_precision=options.opt_level is not None,
+        masked_lm=masked_lm,
     )
 
 

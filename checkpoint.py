@@ -12,7 +12,7 @@ import torch.nn as nn
 from halo import Halo
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from transformers import BertForMaskedLM, BertTokenizer
+from transformers import PreTrainedModel, PreTrainedTokenizer
 
 default_checkpoint = {
     "epoch": 0,
@@ -222,7 +222,7 @@ class Logger(object):
                 fd.write("```\n")
 
     def save_checkpoint(
-        self, model: BertForMaskedLM, tokeniser: BertTokenizer, checkpoint: Dict
+        self, model: PreTrainedModel, tokeniser: PreTrainedTokenizer, checkpoint: Dict
     ):
         # Padded to 4 digits because of lexical sorting of numbers.
         # e.g. 0009

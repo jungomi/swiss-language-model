@@ -4,11 +4,11 @@ from typing import List, Optional, Tuple
 
 import torch
 from torch.utils.data import Dataset
-from transformers import BertTokenizer
+from transformers import PreTrainedTokenizer
 
 
 def mask_tokens(
-    tokens: torch.Tensor, tokeniser: BertTokenizer, prob: float = 0.15
+    tokens: torch.Tensor, tokeniser: PreTrainedTokenizer, prob: float = 0.15
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Prepares tokens for masked language modelling (MLM)
@@ -54,14 +54,18 @@ class TextDataset(Dataset):
     def __init__(
         self,
         path: str,
-        tokeniser: BertTokenizer,
+        tokeniser: PreTrainedTokenizer,
+        use_special: bool = True,
         block_size: int = 512,
         name: Optional[str] = None,
     ):
         """
         Args:
             path (string): Path to fiel with the text
-            tokeniser (BertTokenizer): Tokeniser used for BERT.
+            tokeniser (PreTrainedTokenizer): Tokeniser used for the model.
+            use_special (bool, optional): Whether the tokeniser uses speical tokens.
+                Mainly to avoid getting spammed by warnings.
+                [Default: True]
             block_size (int, optional): Size of the blocks of text [Default: 512]
             name (string, optional): Name of the dataset
                 [Default: Name of the ground truth file and its parent directory]
@@ -85,14 +89,13 @@ class TextDataset(Dataset):
                 tokenised_ids.extend(
                     tokeniser.convert_tokens_to_ids(tokeniser.tokenize(line[0]))
                 )
-        self.text_blocks: List[int] = []
+        self.text_blocks: List[List[int]] = []
         # Group into blocks of text, discarding the last incomplete text.
         for i in range(0, len(tokenised_ids) - self.block_size + 1, self.block_size):
-            self.text_blocks.append(
-                tokeniser.build_inputs_with_special_tokens(
-                    tokenised_ids[i : i + self.block_size]
-                )
-            )
+            token_block = tokenised_ids[i : i + self.block_size]
+            if use_special:
+                token_block = tokeniser.build_inputs_with_special_tokens(token_block)
+            self.text_blocks.append(token_block)
 
     def __len__(self) -> int:
         return len(self.text_blocks)
