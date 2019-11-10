@@ -27,7 +27,14 @@ with PyTorch follow the instructions on
 
 ### Apex - Mixed Precision Training (Optional)
 
-For mixed precision training (f16) [Apex][apex] needs to be installed:
+Modern GPUs contain Tensor Cores (starting from V100 and RTX series) which
+enable mixed precision calculation, using optimised fp16 operations while still
+keeping the fp32 weights and therefore precision.
+
+**Other GPUs without Tensor Cores do not benefit from using mixed precision
+since they only do fp32 operations and you may find it even becoming slower.**
+
+[Apex][apex] needs to be installed to enable mixed precision training:
 
 ```sh
 git clone https://github.com/NVIDIA/apex
@@ -37,10 +44,10 @@ pip install -v --user --no-cache-dir --global-option="--cpp_ext" --global-option
 
 Then the `-O`/`--opt-level` can be set to use the different optimisation levels.
 
-- O0: No optimisations (f32)
+- O0: No optimisations (fp32)
 - O1: Mixed precision (Recommended)
-- O2: Almost f16 but still mixed precision
-- O3: Full f16 (Almost guaranteed to lose accuracy)
+- O2: Almost fp16 but still mixed precision
+- O3: Full fp16 (Almost guaranteed to lose accuracy)
 
 
 ## Usage
