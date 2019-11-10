@@ -37,10 +37,10 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--no-vocab",
-        dest="no_vocab",
+        "--vocab",
+        dest="vocab",
         action="store_true",
-        help="Do not generate a vocabulary",
+        help="Generate a vocabulary",
     )
     parser.add_argument(
         "-s",
@@ -91,7 +91,7 @@ def main():
             )
             writer.writerows(validation_lines)
 
-    if not options.no_vocab:
+    if options.vocab:
         vocab_size = 32000
         spiece_out = os.path.join(out_dir, "spiece")
         spiece_args = (
