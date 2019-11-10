@@ -489,11 +489,12 @@ def run(gpu_id, options, distributed=False):
         # But the weights are not loaded
         if pre_trained is None:
             pre_trained = "bert-base-german-cased"
-        config = BertConfig.from_pretrained(pre_trained)
-        model = BertForMaskedLM(config)
         # Use either the provided vocabulary or the pre_trained one.
         vocab = options.vocab or pre_trained
         tokeniser = BertTokenizer.from_pretrained(vocab)
+        config = BertConfig.from_pretrained(pre_trained)
+        config.vocab_size = tokeniser.vocab_size
+        model = BertForMaskedLM(config)
     elif model_kind == "gpt2":
         if pre_trained is None:
             pre_trained = "gpt2"
@@ -508,11 +509,12 @@ def run(gpu_id, options, distributed=False):
         # But the weights are not loaded
         if pre_trained is None:
             pre_trained = "gpt2"
-        config = GPT2Config.from_pretrained(pre_trained)
-        model = GPT2LMHeadModel(config)
         # Use either the provided vocabulary or the pre_trained one.
         vocab = options.vocab or pre_trained
         tokeniser = GPT2Tokenizer.from_pretrained(vocab)
+        config = GPT2Config.from_pretrained(pre_trained)
+        config.vocab_size = tokeniser.vocab_size
+        model = GPT2LMHeadModel(config)
         masked_lm = False
         use_special = False
         add_space = True
