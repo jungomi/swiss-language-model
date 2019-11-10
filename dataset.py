@@ -91,9 +91,14 @@ class TextDataset(Dataset):
             )
             tokenised_ids: List[int] = []
             for line in reader:
-                tokenised_ids.extend(
+                # add_prefix_space is not always supported, therefore it will only be
+                # added if it's actually.
+                encoded = (
                     tokeniser.encode(line[0], add_prefix_space=add_space)
+                    if add_space
+                    else tokeniser.encode(line[0])
                 )
+                tokenised_ids.extend(encoded)
         self.text_blocks: List[List[int]] = []
         # Group into blocks of text, discarding the last incomplete text.
         for i in range(0, len(tokenised_ids) - self.block_size + 1, self.block_size):
