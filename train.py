@@ -397,7 +397,7 @@ def parse_args() -> argparse.Namespace:
         "--model",
         dest="model_kind",
         default=default_model,
-        choices=["bert", "gpt2"],
+        choices=["bert", "bert-scratch", "gpt2", "gpt2-scratch"],
         help="Which kind of model to use [Default: {}]".format(default_model),
     )
     parser.add_argument(
@@ -409,6 +409,12 @@ def parse_args() -> argparse.Namespace:
             "Optimisation level for mixed precision training. "
             "See https://nvidia.github.io/apex/amp.html for details."
         ),
+    )
+    parser.add_argument(
+        "--vocab",
+        dest="vocab",
+        type=str,
+        help="Directory with the vocabulary to use (only for models from scratch)",
     )
 
     return parser.parse_args()
@@ -478,12 +484,35 @@ def run(gpu_id, options, distributed=False):
         config = BertConfig.from_pretrained(pre_trained)
         model = BertForMaskedLM.from_pretrained(pre_trained, config=config)
         tokeniser = BertTokenizer.from_pretrained(pre_trained)
+    elif model_kind == "bert-scratch":
+        # The pre_trained here is only for the configuartion (num layers etc.)
+        # But the weights are not loaded
+        if pre_trained is None:
+            pre_trained = "bert-base-german-cased"
+        config = BertConfig.from_pretrained(pre_trained)
+        model = BertForMaskedLM(config)
+        # Use either the provided vocabulary or the pre_trained one.
+        vocab = options.vocab or pre_trained
+        tokeniser = BertTokenizer.from_pretrained(vocab)
     elif model_kind == "gpt2":
         if pre_trained is None:
             pre_trained = "gpt2"
         config = GPT2Config.from_pretrained(pre_trained)
         model = GPT2LMHeadModel.from_pretrained(pre_trained, config=config)
         tokeniser = GPT2Tokenizer.from_pretrained(pre_trained)
+        masked_lm = False
+        use_special = False
+        add_space = True
+    elif model_kind == "gpt2-scratch":
+        # The pre_trained here is only for the configuartion (num layers etc.)
+        # But the weights are not loaded
+        if pre_trained is None:
+            pre_trained = "gpt2"
+        config = GPT2Config.from_pretrained(pre_trained)
+        model = GPT2LMHeadModel(config)
+        # Use either the provided vocabulary or the pre_trained one.
+        vocab = options.vocab or pre_trained
+        tokeniser = GPT2Tokenizer.from_pretrained(vocab)
         masked_lm = False
         use_special = False
         add_space = True
