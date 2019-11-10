@@ -492,6 +492,8 @@ def run(gpu_id, options, distributed=False):
         # Use either the provided vocabulary or the pre_trained one.
         vocab = options.vocab or pre_trained
         tokeniser = BertTokenizer.from_pretrained(vocab)
+        # The max len needs to be set manually if a custom vocab is loaded.
+        tokeniser.max_len_single_sentence = 510
         config = BertConfig.from_pretrained(pre_trained)
         config.vocab_size = tokeniser.vocab_size
         model = BertForMaskedLM(config)
@@ -512,6 +514,8 @@ def run(gpu_id, options, distributed=False):
         # Use either the provided vocabulary or the pre_trained one.
         vocab = options.vocab or pre_trained
         tokeniser = GPT2Tokenizer.from_pretrained(vocab)
+        # The max len needs to be set manually if a custom vocab is loaded.
+        tokeniser.max_len_single_sentence = 1024
         config = GPT2Config.from_pretrained(pre_trained)
         config.vocab_size = tokeniser.vocab_size
         model = GPT2LMHeadModel(config)
