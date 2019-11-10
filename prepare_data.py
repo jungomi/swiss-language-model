@@ -1,9 +1,13 @@
 import argparse
 import csv
+import json
 import os
+import tempfile
 
 import torch
-from sentencepiece import SentencePieceTrainer
+from halo import Halo
+from sentencepiece import SentencePieceProcessor, SentencePieceTrainer
+from subword_nmt.learn_bpe import learn_bpe
 
 seed = 1234
 
@@ -37,10 +41,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--vocab",
-        dest="vocab",
-        action="store_true",
-        help="Generate a vocabulary",
+        "--vocab", dest="vocab", action="store_true", help="Generate a vocabulary"
     )
     parser.add_argument(
         "-s",
@@ -58,6 +59,7 @@ def main():
     torch.manual_seed(options.seed)
     basename = os.path.splitext(os.path.basename(options.input))[0]
     out_dir = options.out_dir or "data/{}/".format(basename)
+    spinner = Halo(spinner="dots", placement="right")
 
     with open(options.input, "r") as fd:
         reader = csv.reader(fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar="")
@@ -109,6 +111,7 @@ def main():
             vocab = [line[0] for line in reader]
         # Remove the special tokens <unk>, <s>, </s>
         vocab = vocab[3:]
+
         # Convert to BERT style
         bert_vocab = [
             v[1:] if v.startswith("▁") else "##{}".format(v) for v in vocab if v != "▁"
@@ -123,6 +126,58 @@ def main():
                 fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
             )
             writer.writerows([[b] for b in bert_vocab])
+
+        # Convert to GPT-2 style
+        # Unfortunately it's slow and tedious.
+        spinner.start(text="Generating BPE vocabulary")
+        gpt2_vocab = ["Ġ{}".format(v[1:]) if v.startswith("▁") else v for v in vocab]
+        # Add the GPT-2 special token to the end
+        gpt2_vocab.append("<|endoftext|>")
+        with open(os.path.join(out_dir, "vocab.json"), "w") as fd:
+            json.dump({v: i for i, v in enumerate(gpt2_vocab)}, fd, ensure_ascii=False)
+        spiece_processor = SentencePieceProcessor()
+        spiece_processor.Load("{}.model".format(spiece_out))
+        # Encode the whole text
+        encoded = [
+            [" ".join(spiece_processor.EncodeAsPieces(l[0])).replace("▁", "Ġ")]
+            for l in lines
+        ]
+        tmp_encoded_fd, tmp_encoded_path = tempfile.mkstemp()
+        tmp_bpe_fd, tmp_bpe_path = tempfile.mkstemp()
+        try:
+            # Write the encoded text to a temporary file.
+            with os.fdopen(tmp_encoded_fd, "w") as fd:
+                writer = csv.writer(
+                    fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+                )
+                writer.writerows(encoded)
+            learn_bpe(
+                open(tmp_encoded_path, "r"),
+                open(tmp_bpe_path, "w"),
+                num_symbols=vocab_size,
+            )
+            with open(tmp_bpe_path, "r") as fd:
+                reader = csv.reader(
+                    fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+                )
+                seen = set()
+                merges = []
+                for line in reader:
+                    # Get rid of the </w> tokens
+                    line = line[0].replace("</w>", "")
+                    # Remove duplicates (due to </w> tokens)
+                    if line not in seen:
+                        seen.add(line)
+                        merges.append([line])
+            with open(os.path.join(out_dir, "merges.txt"), "w") as fd:
+                writer = csv.writer(
+                    fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+                )
+                writer.writerows(merges)
+        finally:
+            os.remove(tmp_encoded_path)
+            os.remove(tmp_bpe_path)
+        spinner.stop()
 
 
 if __name__ == "__main__":
