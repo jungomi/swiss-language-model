@@ -92,13 +92,37 @@ def main():
             writer.writerows(validation_lines)
 
     if not options.no_vocab:
+        vocab_size = 32000
+        spiece_out = os.path.join(out_dir, "spiece")
         spiece_args = (
             "--input={} "
             "--model_prefix={} "
-            "--vocab_size=32000 "
+            "--vocab_size={} "
             "--character_coverage=1.0"
-        ).format(output_full, os.path.join(out_dir, "spiece"))
+        ).format(output_full, spiece_out, vocab_size)
         SentencePieceTrainer.Train(spiece_args)
+        # Load the generated vocabulary
+        with open("{}.vocab".format(spiece_out), "r") as fd:
+            reader = csv.reader(
+                fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+            )
+            vocab = [line[0] for line in reader]
+        # Remove the special tokens <unk>, <s>, </s>
+        vocab = vocab[3:]
+        # Convert to BERT style
+        bert_vocab = [
+            v[1:] if v.startswith("▁") else "##{}".format(v) for v in vocab if v != "▁"
+        ]
+        # Add BERT's special tokens to the beginning
+        bert_vocab = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"] + bert_vocab
+        # Fill up with unused tokens
+        pad_size = vocab_size - len(bert_vocab)
+        bert_vocab += ["unused{}".format(i) for i in range(pad_size)]
+        with open(os.path.join(out_dir, "vocab.txt"), "w") as fd:
+            writer = csv.writer(
+                fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+            )
+            writer.writerows([[b] for b in bert_vocab])
 
 
 if __name__ == "__main__":
