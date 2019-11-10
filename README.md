@@ -18,7 +18,7 @@ The model is then fine tuned on the Swiss German data of the
 All dependencies can be installed with PIP.
 
 ```sh
-pip install -r requirements.txt
+pip install --user -r requirements.txt
 ```
 
 If you'd like to use a different installation method or another CUDA version
