@@ -1,7 +1,7 @@
 import argparse
 import multiprocessing
 import os
-import sys
+import time
 from collections import OrderedDict
 from typing import Dict
 
@@ -272,6 +272,7 @@ def run(gpu_id, options, distributed=False):
         torch.distributed.barrier()
     logger.end("Initialising", spinner=True, prefix=False)
 
+    start_time = time.time()
     logger.set_prefix("Evaluation")
     results = []
     for data_loader in data_loaders:
@@ -289,15 +290,14 @@ def run(gpu_id, options, distributed=False):
         results.append(result)
         logger.end(data_name)
 
+    time_difference = time.time() - start_time
     evaluation_results = [
         OrderedDict(
-            name=result["name"],
-            loss=result["loss"],
-            perplexity=result["perplexity"],
+            name=result["name"], loss=result["loss"], perplexity=result["perplexity"]
         )
         for result in results
     ]
-    logger.log_epoch_stats(evaluation_results, metrics)
+    logger.log_epoch_stats(evaluation_results, metrics, time_elapsed=time_difference)
 
 
 if __name__ == "__main__":
