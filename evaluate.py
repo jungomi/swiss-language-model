@@ -282,15 +282,15 @@ def run(gpu_id, options, distributed=False):
         results.append(result)
         logger.end(data_name)
 
-        epoch_results = [
-            OrderedDict(
-                name=result["name"],
-                loss=result["loss"],
-                perplexity=result["perplexity"],
-            )
-            for result in results
-        ]
-        logger.log_epoch_stats(epoch_results, metrics)
+    evaluation_results = [
+        OrderedDict(
+            name=result["name"],
+            loss=result["loss"],
+            perplexity=result["perplexity"],
+        )
+        for result in results
+    ]
+    logger.log_epoch_stats(evaluation_results, metrics)
 
 
 if __name__ == "__main__":
