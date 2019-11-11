@@ -63,6 +63,8 @@ class Logger(object):
         self.delimiter = delimiter
         self.created_timestamp = datetime.now()
         self.log_dir = os.path.join(dir, name)
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir)
         self.checkpoint_dir = os.path.join(self.log_dir, "checkpoints")
         self.git_hash = (
             subprocess.check_output(["git", "-C", repo_path, "rev-parse", "HEAD"])
@@ -81,8 +83,6 @@ class Logger(object):
         # Only create checkpoints and tensorboard when training.
         if train:
             self.tensorboard = SummaryWriter(os.path.join(self.log_dir, "tensorboard"))
-            if not os.path.exists(self.log_dir):
-                os.makedirs(self.log_dir)
             if not os.path.exists(self.checkpoint_dir):
                 os.makedirs(self.checkpoint_dir)
 
