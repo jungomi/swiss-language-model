@@ -115,6 +115,18 @@ def run_epoch(
     logger.progress_end()
 
     loss = torch.mean(torch.tensor(losses))
+    # Gather the loss onto the primary process to have accurate metrics.
+    if sampler is not None:
+        # Only the primary process has a real logger
+        if isinstance(logger, Logger):
+            gathered_losses = [
+                torch.zeros_like(loss)
+                for _ in range(sampler.num_replicas)  # type: ignore
+            ]
+            dist.gather(loss, gathered_losses, dst=0)
+            loss = torch.mean(torch.tensor(gathered_losses))
+        else:
+            dist.gather(loss, dst=0)
     perplexity = torch.exp(loss)
     return OrderedDict(loss=loss.item(), perplexity=perplexity.item())
 

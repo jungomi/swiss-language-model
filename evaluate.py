@@ -74,6 +74,18 @@ def evaluate(
     logger.progress_end()
 
     loss = torch.mean(torch.tensor(losses))
+    # Gather the loss onto the primary process to have accurate metrics.
+    if sampler is not None:
+        # Only the primary process has a real logger
+        if isinstance(logger, Logger):
+            gathered_losses = [
+                torch.zeros_like(loss)
+                for _ in range(sampler.num_replicas)  # type: ignore
+            ]
+            dist.gather(loss, gathered_losses, dst=0)
+            loss = torch.mean(torch.tensor(gathered_losses))
+        else:
+            dist.gather(loss, dst=0)
     perplexity = torch.exp(loss)
     return OrderedDict(loss=loss.item(), perplexity=perplexity.item())
 
@@ -161,11 +173,6 @@ def main():
         # Manullay adjust the batch size and workers to split amongst the processes.
         options.batch_size = options.batch_size // options.num_gpus
         options.num_workers = options.num_workers // options.num_gpus
-        print(
-            "WARNING: Multi-GPU may not correctly reflect the metrics. "
-            "It should be run on a single GPU to get accurate results.",
-            file=sys.stderr,
-        )
         mp.spawn(run, nprocs=options.num_gpus, args=(options, True))
     else:
         run(0, options)
