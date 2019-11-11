@@ -55,17 +55,15 @@ class Noop(object):
 class Logger(object):
     """Logger for anything related to the training"""
 
-    def __init__(self, name: str, dir: str = "./log", delimiter: str = "\t"):
+    def __init__(
+        self, name: str, dir: str = "./log", delimiter: str = "\t", train: bool = True
+    ):
         super(Logger, self).__init__()
         self.name = name
         self.delimiter = delimiter
         self.created_timestamp = datetime.now()
         self.log_dir = os.path.join(dir, name)
         self.checkpoint_dir = os.path.join(self.log_dir, "checkpoints")
-        if not os.path.exists(self.log_dir):
-            os.makedirs(self.log_dir)
-        if not os.path.exists(self.checkpoint_dir):
-            os.makedirs(self.checkpoint_dir)
         self.git_hash = (
             subprocess.check_output(["git", "-C", repo_path, "rev-parse", "HEAD"])
             .strip()
@@ -78,9 +76,15 @@ class Logger(object):
             os.path.join(self.log_dir, "output.log"), "w", buffering=1
         )
         self.events_time: Dict[str, float] = {}
-        self.tensorboard = SummaryWriter(os.path.join(self.log_dir, "tensorboard"))
         self.spinner = Halo(spinner="dots", placement="right")
         self.prefix = ""
+        # Only create checkpoints and tensorboard when training.
+        if train:
+            self.tensorboard = SummaryWriter(os.path.join(self.log_dir, "tensorboard"))
+            if not os.path.exists(self.log_dir):
+                os.makedirs(self.log_dir)
+            if not os.path.exists(self.checkpoint_dir):
+                os.makedirs(self.checkpoint_dir)
 
     def __del__(self):
         self.events_file.close()

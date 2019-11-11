@@ -187,7 +187,7 @@ def run(gpu_id, options, distributed=False):
     device = torch.device("cuda" if use_cuda else "cpu")
     checkpoint = load_checkpoint(os.path.join(options.checkpoint, "stats.pth"))
     name = "evaluate-{}".format(options.checkpoint)
-    logger = Logger(name) if gpu_id == 0 else Noop()
+    logger = Logger(name, train=False) if gpu_id == 0 else Noop()
 
     logger.start("Initialising", spinner=True, prefix=False)
 
