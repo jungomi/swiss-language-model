@@ -10,6 +10,8 @@ from sentencepiece import SentencePieceProcessor, SentencePieceTrainer
 from subword_nmt.learn_bpe import learn_bpe
 
 seed = 1234
+data_type = "leipzig"
+min_prob = 0.99
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +53,26 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Seed for random initialisation [Default: {}]".format(seed),
     )
+    parser.add_argument(
+        "-t",
+        "--type",
+        dest="data_type",
+        type=str,
+        choices=["leipzig", "lrec"],
+        default=data_type,
+        help="Type of dataset to prepare [Default: {}]".format(data_type),
+    )
+    parser.add_argument(
+        "-p",
+        "--probability",
+        dest="min_prob",
+        type=float,
+        default=min_prob,
+        help=(
+            "Minimum probability to keep a line (only applicable to the LREC dataset) "
+            "[Default: {}]".format(min_prob)
+        ),
+    )
     return parser.parse_args()
 
 
@@ -62,8 +84,24 @@ def main():
     spinner = Halo(spinner="dots", placement="right")
 
     with open(options.input, "r") as fd:
-        reader = csv.reader(fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar="")
-        lines = [[line[1]] for line in reader]
+        if options.data_type == "leipzig":
+            reader = csv.reader(
+                fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
+            )
+            lines = [[line[1]] for line in reader]
+        elif options.data_type == "lrec":
+            reader = csv.reader(fd, delimiter=",")
+            lines = []
+            for i, line in enumerate(reader):
+                # Skip the header
+                if i == 0:
+                    continue
+                text = line[0]
+                probability = float(line[2])
+                if probability >= options.min_prob:
+                    lines.append([text])
+        else:
+            raise Exception("Not a valid data type {}".format(options.data_type))
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
