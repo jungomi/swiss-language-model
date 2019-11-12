@@ -77,8 +77,7 @@ def evaluate(
     # Gather the loss onto the primary process to have accurate metrics.
     if sampler is not None:
         gathered_losses = [
-            torch.zeros_like(loss)
-            for _ in range(sampler.num_replicas)  # type: ignore
+            torch.zeros_like(loss) for _ in range(sampler.num_replicas)  # type: ignore
         ]
         dist.all_gather(gathered_losses, loss)
         loss = torch.mean(torch.tensor(gathered_losses))
@@ -106,7 +105,9 @@ def parse_args() -> argparse.Namespace:
         "--checkpoint",
         dest="checkpoint",
         required=True,
-        help="Path to the checkpoint to be evaluated",
+        nargs="+",
+        type=str,
+        help="Paths to the checkpoints to be evaluated",
     )
     parser.add_argument(
         "-b",
@@ -185,115 +186,120 @@ def run(gpu_id, options, distributed=False):
         torch.cuda.set_device(gpu_id)
     use_cuda = torch.cuda.is_available() and not options.no_cuda
     device = torch.device("cuda" if use_cuda else "cpu")
-    checkpoint = load_checkpoint(os.path.join(options.checkpoint, "stats.pth"))
-    name = "evaluate-{}".format(options.checkpoint)
-    logger = Logger(name, train=False) if gpu_id == 0 else Noop()
+    for cp in options.checkpoint:
+        checkpoint = load_checkpoint(os.path.join(cp, "stats.pth"))
+        name = "evaluate-{}".format(cp)
+        logger = Logger(name, train=False) if gpu_id == 0 else Noop()
 
-    logger.start("Initialising", spinner=True, prefix=False)
+        logger.start("Initialising", spinner=True, prefix=False)
 
-    # All but the primary GPU wait here, so that only the primary process loads the
-    # pre-trained model and the rest uses the cached version.
-    if distributed and gpu_id != 0:
-        torch.distributed.barrier()
+        # All but the primary GPU wait here, so that only the primary process loads the
+        # pre-trained model and the rest uses the cached version.
+        if distributed and gpu_id != 0:
+            torch.distributed.barrier()
 
-    model_kind = checkpoint["model"].get("kind")
-    use_special = True
-    masked_lm = True
-    add_space = False
-    if model_kind == "bert" or model_kind == "bert-scratch":
-        config = BertConfig.from_pretrained(options.checkpoint)
-        model = BertForMaskedLM.from_pretrained(options.checkpoint, config=config)
-        tokeniser = BertTokenizer.from_pretrained(options.checkpoint)
-    elif model_kind == "gpt2" or model_kind == "gpt2-scratch":
-        config = GPT2Config.from_pretrained(options.checkpoint)
-        model = GPT2LMHeadModel.from_pretrained(options.checkpoint, config=config)
-        tokeniser = GPT2Tokenizer.from_pretrained(options.checkpoint)
-        masked_lm = False
-        use_special = False
-        add_space = True
-    else:
-        raise Exception("No model available for {}".format(model_kind))
-    model = model.to(device)
-
-    # Primary process has loaded the model and the other can now load the cached
-    # version.
-    if distributed and gpu_id == 0:
-        torch.distributed.barrier()
-
-    data_loaders = []
-    for data_file in options.datasets:
-        data = data_file.split("=", 1)
-        if len(data) > 1:
-            # Remove whitespace around the name
-            name = data[0].strip()
-            # Expand the ~ to the full path as it won't be done automatically since it's
-            # not at the beginning of the word.
-            file_path = os.path.expanduser(data[1])
+        model_kind = checkpoint["model"].get("kind")
+        use_special = True
+        masked_lm = True
+        add_space = False
+        if model_kind == "bert" or model_kind == "bert-scratch":
+            config = BertConfig.from_pretrained(cp)
+            model = BertForMaskedLM.from_pretrained(cp, config=config)
+            tokeniser = BertTokenizer.from_pretrained(cp)
+        elif model_kind == "gpt2" or model_kind == "gpt2-scratch":
+            config = GPT2Config.from_pretrained(cp)
+            model = GPT2LMHeadModel.from_pretrained(cp, config=config)
+            tokeniser = GPT2Tokenizer.from_pretrained(cp)
+            masked_lm = False
+            use_special = False
+            add_space = True
         else:
-            name = None
-            file_path = data[0]
-        dataset = TextDataset(
-            file_path,
-            tokeniser,
-            name=name,
-            use_special=use_special,
-            add_space=add_space,
-        )
-        sampler = (
-            DistributedSampler(
-                dataset, num_replicas=options.num_gpus, rank=gpu_id, shuffle=False
+            raise Exception("No model available for {}".format(model_kind))
+        model = model.to(device)
+
+        # Primary process has loaded the model and the other can now load the cached
+        # version.
+        if distributed and gpu_id == 0:
+            torch.distributed.barrier()
+
+        data_loaders = []
+        for data_file in options.datasets:
+            data = data_file.split("=", 1)
+            if len(data) > 1:
+                # Remove whitespace around the name
+                name = data[0].strip()
+                # Expand the ~ to the full path as it won't be done automatically since
+                # it's not at the beginning of the word.
+                file_path = os.path.expanduser(data[1])
+            else:
+                name = None
+                file_path = data[0]
+            dataset = TextDataset(
+                file_path,
+                tokeniser,
+                name=name,
+                use_special=use_special,
+                add_space=add_space,
             )
-            if distributed
-            else None
-        )
-        data_loader = DataLoader(
-            dataset,
-            batch_size=options.batch_size,
-            shuffle=False,
-            num_workers=options.num_workers,
-            sampler=sampler,
-            pin_memory=True,
-        )
-        data_loaders.append(data_loader)
+            sampler = (
+                DistributedSampler(
+                    dataset, num_replicas=options.num_gpus, rank=gpu_id, shuffle=False
+                )
+                if distributed
+                else None
+            )
+            data_loader = DataLoader(
+                dataset,
+                batch_size=options.batch_size,
+                shuffle=False,
+                num_workers=options.num_workers,
+                sampler=sampler,
+                pin_memory=True,
+            )
+            data_loaders.append(data_loader)
 
-    if distributed:
-        model = DistributedDataParallel(
-            model, device_ids=[gpu_id], find_unused_parameters=True
-        )
+        if distributed:
+            model = DistributedDataParallel(
+                model, device_ids=[gpu_id], find_unused_parameters=True
+            )
 
-    # Wait for all processes to load eveything before starting training.
-    # Not strictly necessary, since they will wait once the actual model is run, but
-    # this makes it nicer to show the spinner until all of them are ready.
-    if distributed:
-        torch.distributed.barrier()
-    logger.end("Initialising", spinner=True, prefix=False)
+        # Wait for all processes to load eveything before starting training.
+        # Not strictly necessary, since they will wait once the actual model is run, but
+        # this makes it nicer to show the spinner until all of them are ready.
+        if distributed:
+            torch.distributed.barrier()
+        logger.end("Initialising", spinner=True, prefix=False)
 
-    start_time = time.time()
-    logger.set_prefix("Evaluation")
-    results = []
-    for data_loader in data_loaders:
-        data_name = data_loader.dataset.name
-        logger.start(data_name)
-        result = evaluate(
-            data_loader,
-            model,
-            device=device,
-            name=data_name,
-            logger=logger,
-            masked_lm=masked_lm,
-        )
-        result["name"] = data_name
-        results.append(result)
-        logger.end(data_name)
+        start_time = time.time()
+        logger.set_prefix("Evaluation - {}".format(cp))
+        results = []
+        for data_loader in data_loaders:
+            data_name = data_loader.dataset.name
+            logger.start(data_name)
+            result = evaluate(
+                data_loader,
+                model,
+                device=device,
+                name=data_name,
+                logger=logger,
+                masked_lm=masked_lm,
+            )
+            result["name"] = data_name
+            results.append(result)
+            logger.end(data_name)
 
-    time_difference = time.time() - start_time
-    evaluation_results = [
-        OrderedDict(
-            name=result["name"], loss=result["loss"], perplexity=result["perplexity"]
+        time_difference = time.time() - start_time
+        evaluation_results = [
+            OrderedDict(
+                name=result["name"],
+                loss=result["loss"],
+                perplexity=result["perplexity"],
+            )
+            for result in results
+        ]
+        logger.log_epoch_stats(
+            evaluation_results, metrics, time_elapsed=time_difference, pad_prefix=False
         )
-        for result in results
-    ]
-    logger.log_epoch_stats(evaluation_results, metrics, time_elapsed=time_difference)
 
 
 if __name__ == "__main__":

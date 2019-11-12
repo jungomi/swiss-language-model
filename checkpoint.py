@@ -272,6 +272,7 @@ class Logger(object):
         metrics: List[OrderedDict],
         lr: Optional[float] = None,
         time_elapsed: Optional[float] = None,
+        pad_prefix: bool = True,
     ):
         description = "{prefix}:".format(prefix=self.prefix)
         if lr is not None:
@@ -281,7 +282,7 @@ class Logger(object):
                 elapsed=time.strftime("%H:%M:%S", time.gmtime(time_elapsed))
             )
         self.println(description)
-        prefix_pad = " " * len(self.prefix)
+        prefix_pad = " " * len(self.prefix) if pad_prefix else ""
         header_names = ["Name"] + [metric["name"] for metric in metrics]
         header_lengths = [len(name) for name in header_names]
         line_values = []
