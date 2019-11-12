@@ -114,7 +114,7 @@ def run_epoch(
 
     logger.progress_end()
 
-    loss = torch.mean(torch.tensor(losses))
+    loss = torch.mean(torch.tensor(losses, device=device))
     # Gather the loss onto the primary process to have accurate metrics.
     if sampler is not None:
         gathered_losses = [
