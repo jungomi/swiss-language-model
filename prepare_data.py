@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
         "--type",
         dest="data_type",
         type=str,
-        choices=["leipzig", "lrec"],
+        choices=["leipzig", "swiss-crawl"],
         default=data_type,
         help="Type of dataset to prepare [Default: {}]".format(data_type),
     )
@@ -69,7 +69,8 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=min_prob,
         help=(
-            "Minimum probability to keep a line (only applicable to the LREC dataset) "
+            "Minimum probability to keep a line "
+            "(only applicable to the SwissCrawl dataset) "
             "[Default: {}]".format(min_prob)
         ),
     )
@@ -89,7 +90,7 @@ def main():
                 fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
             )
             lines = [[line[1]] for line in reader]
-        elif options.data_type == "lrec":
+        elif options.data_type == "swiss-crawl":
             reader = csv.reader(fd, delimiter=",")
             lines = []
             for i, line in enumerate(reader):
