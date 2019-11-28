@@ -1,6 +1,7 @@
 # Swiss Language Model
 
-A language model for Swiss German.
+A language model for Swiss German based on
+[Huggingface/Transformers][huggingface-transformers].
 
 Using [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding][arxiv-bert]
 pre-trained on [cased German text by Deepset.ai][bert-german], which included:
@@ -8,12 +9,17 @@ German Wikipedia dump (6GB of raw txt files), the OpenLegalData dump (2.4 GB)
 and news articles (3.6 GB)
 
 The model is then fine tuned on the Swiss German data of the
-[Leipzig Corpora Collection][leipzig-corpora].
+[Leipzig Corpora Collection][leipzig-corpora] and
+[SwissCrawl][swiss-crawl-corpus].
+
+Alternatively, a GPT-2 model can also be trained, but there is no German
+pre-trained model available for that.
 
 ## Requirements
 
 - Python 3
 - [PyTorch][pytorch]
+- [Huggingface/Transformers][huggingface-transformers]
 
 All dependencies can be installed with PIP.
 
@@ -72,8 +78,16 @@ given, it will be generated to `data/<basename-of-input-file>`, which would be
 `data/leipzig/` in this example.
 `--split` optionally generates a training validation split (80/20 in this case)
 additionally to the full data.
-You can also generate a vocabulary, SentencePiece and WordPiece (BERT's style)
-from the input by supplying the `--vocab` flag.
+You can also generate a vocabulary, SentencePiece, WordPiece (BERT's style) and
+Byte Pair Encoding (BPE) from the input by supplying the `--vocab` flag.
+
+Similarly, the SwissCrawl data can be prepared by setting the `-t`/`--type`
+option to `swiss-crawl`. For this preparation a minimum probability of 0.99 is
+used by default and can be changed with `-p`/`--p`.
+
+```sh
+python prepare_data.py -i data/swiss-crawl.csv -o swiss-crawl-converted --split 80 -t swiss-crawl
+```
 
 ### Training
 
@@ -86,6 +100,19 @@ python train.py --name some-name -c log/some-name/checkpoints/0022/ --train-text
 The `--name` option is used to give it a name, otherwise the checkpoints are
 just numbered without any given name and `-c` is to resume from the given
 checkpoint, if not specified it starts fresh.
+
+Different models can be selected with the `-m`/`--model` option, which are
+either `bert` or `gpt2`, to fine tune a pre-trained model, which can be changed
+with the `--pre-trained` option by specifying one model available at
+[Huggingface Transformers - Pretrained Models][huggingface-pre-trained] or by
+specifyiing a path to the pre-trained model.
+There's also the possibility to train either of the model from scratch by
+choosing `bert-scratch` or `gpt-scratch` for the `--model`. The configuration
+used can still be changed with the `--pre-trained` option, but the pre-trained
+weights will not be loaded, just the configuration. Addtionally, the vocabulary
+can be changed with `--vocab` (path to the directory of the generated
+vocabularies) if another vocbaulary instead of the pre-trained one should be
+used.
 
 For all options see `python train.py --help`.
 
@@ -110,6 +137,9 @@ tensorboard --logdir log
 [apex]: https://github.com/nvidia/apex
 [arxiv-bert]: https://arxiv.org/abs/1810.04805
 [bert-german]: https://deepset.ai/german-bert
+[huggingface-transformers]: https://github.com/huggingface/transformers
+[huggingface-pre-trained]: https://huggingface.co/transformers/pretrained_models.html
 [leipzig-corpora]: https://wortschatz.uni-leipzig.de/en/download/
 [pytorch]: https://pytorch.org/
 [pytorch-started]: https://pytorch.org/get-started/locally/
+[swiss-crawl-corpus]: https://icosys.ch/swisscrawl
