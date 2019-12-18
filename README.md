@@ -55,6 +55,11 @@ Then the `-O`/`--opt-level` can be set to use the different optimisation levels.
 - O2: Almost fp16 but still mixed precision
 - O3: Full fp16 (Almost guaranteed to lose accuracy)
 
+## Models
+
+| Model           | Configuration | Datasets used for training | Download                      |
+|-----------------|---------------|----------------------------|-------------------------------|
+| `bert-swiss-lm` | `bert-base`   | Leipzig and SwissCrawl     | [Google Drive][bert-swiss-lm] |
 
 ## Usage
 
@@ -137,6 +142,7 @@ tensorboard --logdir log
 [apex]: https://github.com/nvidia/apex
 [arxiv-bert]: https://arxiv.org/abs/1810.04805
 [bert-german]: https://deepset.ai/german-bert
+[bert-swiss-lm]: https://drive.google.com/open?id=1FBIIMO9C1Os-Er7DpL2G2DuUbsjWP2ts
 [huggingface-transformers]: https://github.com/huggingface/transformers
 [huggingface-pre-trained]: https://huggingface.co/transformers/pretrained_models.html
 [leipzig-corpora]: https://wortschatz.uni-leipzig.de/en/download/
