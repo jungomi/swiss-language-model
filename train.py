@@ -1,10 +1,10 @@
 import argparse
-import multiprocessing
 import os
 import time
 from collections import OrderedDict
 from typing import Dict, Optional
 
+import lavd
 import torch
 import torch.cuda.amp as amp
 import torch.distributed as dist
@@ -25,20 +25,29 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from checkpoint import Logger, Noop, default_checkpoint, load_checkpoint, metrics
+from checkpoint import (
+    default_checkpoint,
+    load_checkpoint,
+    log_epoch_stats,
+    log_experiment,
+    log_results,
+    log_top_checkpoints,
+    metrics,
+    save_checkpoint,
+)
 from dataset import TextDataset, mask_tokens
 
 batch_size = 1
-num_workers = multiprocessing.cpu_count()
+num_workers = mp.cpu_count()
 num_gpus = torch.cuda.device_count()
 num_epochs = 100
+
 lr = 5e-5
 adam_eps = 1e-8
 lr_warmup = 0
 weight_decay = 0.0
 seed = 1234
 default_model = "bert"
-default_name = "default"
 
 
 def run_epoch(
@@ -46,7 +55,7 @@ def run_epoch(
     model: nn.Module,
     optimiser: optim.Optimizer,  # type: ignore
     device: torch.device,
-    logger: Logger,
+    logger: lavd.Logger,
     epoch: int,
     train: bool = True,
     amp_scaler: Optional[amp.GradScaler] = None,
@@ -69,7 +78,9 @@ def run_epoch(
         sampler.set_epoch(epoch)
 
     losses = []
-    logger.progress_start(name, total=len(data_loader.dataset))
+    pbar = logger.progress_bar(
+        name, total=len(data_loader.dataset), leave=False, dynamic_ncols=True
+    )
     tokeniser = data_loader.dataset.tokeniser  # type: ignore
     for d in data_loader:
         d = d.to(device)
@@ -103,13 +114,13 @@ def run_epoch(
                 amp_scaler.step(optimiser)
                 amp_scaler.update()
 
-        logger.progress_step(
+        pbar.update(
             curr_batch_size
             if sampler is None
             else curr_batch_size * sampler.num_replicas  # type: ignore
         )
 
-    logger.progress_end()
+    pbar.close()
 
     loss = torch.mean(torch.tensor(losses, device=device))
     # Gather the loss onto the primary process to have accurate metrics.
@@ -124,7 +135,7 @@ def run_epoch(
 
 
 def train(
-    logger: Logger,
+    logger: lavd.Logger,
     model: nn.Module,
     optimiser: optim.Optimizer,  # type: ignore
     train_data_loader: DataLoader,
@@ -148,7 +159,9 @@ def train(
         val_result = (
             validation_cp[val_name]
             if val_name in validation_cp
-            else OrderedDict(start=start_epoch, loss=[], perplexity=[])
+            else OrderedDict(
+                start=start_epoch, stats=OrderedDict(loss=[], perplexity=[])
+            )
         )
         validation_results_dict[val_name] = val_result
 
@@ -186,9 +199,11 @@ def train(
             amp_scaler=amp_scaler,
             masked_lm=masked_lm,
         )
-        train_stats["loss"].append(train_result["loss"])
-        train_stats["perplexity"].append(train_result["perplexity"])
-        train_result["name"] = "Train"
+        train_stats["stats"]["loss"].append(train_result["loss"])
+        train_stats["stats"]["perplexity"].append(train_result["perplexity"])
+        epoch_lr = lr_scheduler.get_last_lr()[0]  # type: ignore
+        train_stats["lr"].append(epoch_lr)
+        lr_scheduler.step()
         logger.end("Train")
 
         validation_results = []
@@ -208,69 +223,70 @@ def train(
                 amp_scaler=amp_scaler,
                 masked_lm=masked_lm,
             )
-            validation_result["name"] = val_name
-            validation_results.append(validation_result)
-            val_stats = validation_results_dict[val_name]
-            val_stats["loss"].append(validation_result["loss"])
-            val_stats["perplexity"].append(validation_result["perplexity"])
+            validation_results.append(
+                OrderedDict(name=val_name, stats=validation_result)
+            )
+            validation_results_dict[val_name]["stats"]["loss"].append(
+                validation_result["loss"]
+            )
+            validation_results_dict[val_name]["stats"]["perplexity"].append(
+                validation_result["perplexity"]
+            )
             logger.end(val_text)
 
-        epoch_lr = lr_scheduler.get_last_lr()[0]  # type: ignore
-        lr_scheduler.step()
-        train_result["lr"] = epoch_lr
-        train_stats["lr"].append(epoch_lr)
+        with logger.spinner("Checkpoint", placement="right"):
+            # Multi-gpu models wrap the original model. To make the checkpoint
+            # compatible with the original model, the state dict of .module is saved.
+            model_unwrapped = (
+                model.module if isinstance(model, DistributedDataParallel) else model
+            )
+            save_checkpoint(
+                logger,
+                model_unwrapped,
+                tokeniser,
+                stats=OrderedDict(
+                    epoch=actual_epoch,
+                    train=train_stats,
+                    validation=validation_results_dict,
+                    outdated_validation=outdated_validations,
+                    model=OrderedDict(kind=model_kind),
+                ),
+                step=actual_epoch,
+            )
 
-        logger.start("Checkpoint", spinner=True)
-        # Multi-gpu models wrap the original model. To make the checkpoint compatible
-        # with the original model, the state dict of .module is saved.
-        model_unwrapped = (
-            model.module if isinstance(model, DistributedDataParallel) else model
-        )
-        logger.save_checkpoint(
-            model_unwrapped,
-            tokeniser,
-            checkpoint=OrderedDict(
-                epoch=actual_epoch,
-                train=train_stats,
-                validation=validation_results_dict,
-                outdated_validation=outdated_validations,
-                model=OrderedDict(kind=model_kind),
-            ),
-        )
-        logger.end("Checkpoint", spinner=True)
+        with logger.spinner("Logging Data", placement="right"):
+            log_results(
+                logger,
+                actual_epoch,
+                OrderedDict(lr=epoch_lr, stats=train_result),
+                validation_results,
+                model_unwrapped,
+            )
 
-        logger.start("Tensorboard", spinner=True)
-        logger.write_tensorboard(
-            actual_epoch, train_result, validation_results, model_unwrapped
-        )
-        logger.end("Tensorboard", spinner=True)
-
-        logger.start("Log Best Checkpoint", spinner=True)
-        logger.log_top_checkpoints(validation_results_dict, metrics)
-        logger.end("Log Best Checkpoint", spinner=True)
+        with logger.spinner("Best Checkpoints", placement="right"):
+            val_stats = OrderedDict(
+                {
+                    val_name: {
+                        "name": val_name,
+                        "start": val_result["start"],
+                        "stats": val_result["stats"],
+                    }
+                    for val_name, val_result in validation_results_dict.items()
+                }
+            )
+            log_top_checkpoints(logger, val_stats, metrics)
 
         time_difference = time.time() - start_time
         epoch_results = [
-            OrderedDict(
-                name="Train",
-                loss=train_result["loss"],
-                perplexity=train_result["perplexity"],
-            )
-        ] + [
-            OrderedDict(
-                name=val_result["name"],
-                loss=val_result["loss"],
-                perplexity=val_result["perplexity"],
-            )
-            for val_result in validation_results
-        ]
-        logger.log_epoch_stats(
-            epoch_results, metrics, lr=epoch_lr, time_elapsed=time_difference
+            OrderedDict(name="Train", stats=train_result)
+        ] + validation_results
+        log_epoch_stats(
+            logger, epoch_results, metrics, lr=epoch_lr, time_elapsed=time_difference
         )
         logger.end(epoch_text, prefix=False)
 
 
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--train-text",
@@ -382,11 +398,7 @@ def parse_args() -> argparse.Namespace:
         help="Do not use CUDA even if it's available",
     )
     parser.add_argument(
-        "--name",
-        dest="name",
-        default=default_name,
-        type=str,
-        help="Name of the experiment",
+        "--name", dest="name", type=str, help="Name of the experiment",
     )
     parser.add_argument(
         "-s",
@@ -416,13 +428,11 @@ def parse_args() -> argparse.Namespace:
         type=str,
         help="Directory with the vocabulary to use (only for models from scratch)",
     )
-
-    return parser.parse_args()
+    return parser
 
 
 def main():
-    options = parse_args()
-    torch.manual_seed(options.seed)
+    options = build_parser().parse_args()
     use_cuda = torch.cuda.is_available() and not options.no_cuda
     if use_cuda:
         # Somehow this fixes an unknown error on Windows.
@@ -438,10 +448,14 @@ def main():
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "12345"
         # Manullay adjust the batch size and workers to split amongst the processes.
-        options.batch_size = options.batch_size // options.num_gpus
-        options.num_workers = options.num_workers // options.num_gpus
+        options.actual_batch_size = options.batch_size // options.num_gpus
+        options.actual_num_workers = (
+            options.num_workers + options.num_gpus - 1
+        ) // options.num_gpus
         mp.spawn(run, nprocs=options.num_gpus, args=(options, True))
     else:
+        options.actual_batch_size = options.batch_size
+        options.actual_num_workers = options.num_workers
         run(0, options)
 
 
@@ -454,16 +468,21 @@ def run(gpu_id, options, distributed=False):
             init_method="env://",
         )
         torch.cuda.set_device(gpu_id)
+    torch.manual_seed(options.seed)
     use_cuda = torch.cuda.is_available() and not options.no_cuda
     device = torch.device("cuda" if use_cuda else "cpu")
-    logger = Logger(options.name) if gpu_id == 0 else Noop()
+    logger = lavd.Logger(options.name, disabled=gpu_id != 0)
+    # Parser needs to be rebuilt, since it can't be serialised and it is needed to even
+    # detect the number of GPUs, but here it's only used to log it.
+    parser = build_parser() if gpu_id == 0 else None
 
-    logger.start("Initialising", spinner=True, prefix=False)
+    spinner = logger.spinner("Initialising")
+    spinner.start()
 
     checkpoint = (
         default_checkpoint
         if options.checkpoint is None
-        else load_checkpoint(os.path.join(options.checkpoint, "stats.pth"))
+        else load_checkpoint(os.path.join(options.checkpoint, "stats.pt"))
     )
     # Either use the checkpoint directory as the configuration or use one of the
     # available pre-trained models.
@@ -544,7 +563,7 @@ def run(gpu_id, options, distributed=False):
         batch_size=options.batch_size,
         # Only shuffle when not using a sampler
         shuffle=train_sampler is None,
-        num_workers=options.num_workers,
+        num_workers=options.actual_num_workers,
         sampler=train_sampler,
         pin_memory=True,
     )
@@ -580,7 +599,7 @@ def run(gpu_id, options, distributed=False):
             batch_size=options.batch_size,
             # Only shuffle when not using a sampler
             shuffle=validation_sampler is None,
-            num_workers=options.num_workers,
+            num_workers=options.actual_num_workers,
             sampler=validation_sampler,
             pin_memory=True,
         )
@@ -639,14 +658,16 @@ def run(gpu_id, options, distributed=False):
         validation=validation_details,
         options=options,
     )
-    logger.log_experiment(experiment)
+    log_experiment(logger, experiment)
+
+    logger.log_command(parser, options)
 
     # Wait for all processes to load eveything before starting training.
     # Not strictly necessary, since they will wait once the actual model is run, but
     # this makes it nicer to show the spinner until all of them are ready.
     if distributed:
         torch.distributed.barrier()
-    logger.end("Initialising", spinner=True, prefix=False)
+    spinner.stop()
 
     if options.checkpoint is not None:
         resume_text = "Resuming from - Epoch {epoch}".format(epoch=checkpoint["epoch"])
@@ -654,18 +675,18 @@ def run(gpu_id, options, distributed=False):
         epoch_results = [
             OrderedDict(
                 name="Train",
-                loss=checkpoint["train"]["loss"][-1],
-                perplexity=checkpoint["train"]["perplexity"][-1],
+                loss=checkpoint["train"]["stats"]["loss"][-1],
+                perplexity=checkpoint["train"]["stats"]["perplexity"][-1],
             )
         ] + [
             OrderedDict(
                 name=val_name,
-                loss=val_result["loss"][-1],
-                perplexity=val_result["perplexity"][-1],
+                loss=val_result["loss"]["stats"][-1],
+                perplexity=val_result["perplexity"]["stats"][-1],
             )
             for val_name, val_result in checkpoint["validation"].items()
         ]
-        logger.log_epoch_stats(epoch_results, metrics)
+        log_epoch_stats(logger, epoch_results, metrics)
 
     train(
         logger,

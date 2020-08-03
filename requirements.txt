@@ -1,9 +1,9 @@
 torch==1.6.0
 typing==3.6.6
-tqdm==4.36.1
-halo==0.0.28
-tensorboard==2.0.0
+halo==0.0.29
+tqdm==4.48.0
 transformers==3.0.2
 scikit-learn==0.21.3
 sentencepiece==0.1.83
 subword-nmt==0.3.6
+lavd==0.2.1

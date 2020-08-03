@@ -115,8 +115,8 @@ For all options see `python train.py --help`.
 
 #### Logs
 
-During the training various types of logs are created and everything can be
-found in `log/` and is grouped by the experiment name.
+During the training various types of logs are created with [Lavd][lavd] and
+everything can be found in `log/` and is grouped by the experiment name.
 
 - Summary
 - Checkpoints
@@ -124,11 +124,10 @@ found in `log/` and is grouped by the experiment name.
 - TensorBoard
 - Event logs
 
-Even though they are grouped by the experiment, TensorBoard automatically finds
-all of them, therefore it can be run with:
+To visualise the logged data run:
 
 ```sh
-tensorboard --logdir log
+lavd log/
 ```
 
 [arxiv-bert]: https://arxiv.org/abs/1810.04805
@@ -136,6 +135,7 @@ tensorboard --logdir log
 [bert-swiss-lm]: https://drive.google.com/open?id=1FBIIMO9C1Os-Er7DpL2G2DuUbsjWP2ts
 [huggingface-transformers]: https://github.com/huggingface/transformers
 [huggingface-pre-trained]: https://huggingface.co/transformers/pretrained_models.html
+[lavd]: https://github.com/jungomi/lavd
 [leipzig-corpora]: https://wortschatz.uni-leipzig.de/en/download/
 [pytorch]: https://pytorch.org/
 [pytorch-started]: https://pytorch.org/get-started/locally/

@@ -5,6 +5,7 @@ import time
 from collections import OrderedDict
 from typing import Dict
 
+import lavd
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -21,7 +22,7 @@ from transformers import (
     GPT2Tokenizer,
 )
 
-from checkpoint import Logger, Noop, load_checkpoint, metrics
+from checkpoint import load_checkpoint, log_epoch_stats, metrics
 from dataset import TextDataset, mask_tokens
 
 batch_size = 1
@@ -34,7 +35,7 @@ def evaluate(
     data_loader: DataLoader,
     model: nn.Module,
     device: torch.device,
-    logger: Logger,
+    logger: lavd.Logger,
     masked_lm: bool = True,
     name: str = "",
 ) -> Dict:
@@ -49,7 +50,9 @@ def evaluate(
     )
 
     losses = []
-    logger.progress_start(name, total=len(data_loader.dataset))
+    pbar = logger.progress_bar(
+        name, total=len(data_loader.dataset), leave=False, dynamic_ncols=True
+    )
     tokeniser = data_loader.dataset.tokeniser  # type: ignore
     for d in data_loader:
         d = d.to(device)
@@ -65,13 +68,13 @@ def evaluate(
         loss = output[0]
         losses.append(loss.item())
 
-        logger.progress_step(
+        pbar.update(
             curr_batch_size
             if sampler is None
             else curr_batch_size * sampler.num_replicas  # type: ignore
         )
 
-    logger.progress_end()
+    pbar.close()
 
     loss = torch.mean(torch.tensor(losses, device=device))
     # Gather the loss onto the primary process to have accurate metrics.
@@ -188,10 +191,11 @@ def run(gpu_id, options, distributed=False):
     device = torch.device("cuda" if use_cuda else "cpu")
     for cp in options.checkpoint:
         checkpoint = load_checkpoint(os.path.join(cp, "stats.pth"))
-        name = "evaluate-{}".format(cp)
-        logger = Logger(name, train=False) if gpu_id == 0 else Noop()
+        name = "evaluate/{}".format(cp)
+        logger = lavd.Logger(name, disabled=gpu_id != 0)
 
-        logger.start("Initialising", spinner=True, prefix=False)
+        spinner = logger.spinner("Initialising")
+        spinner.start()
 
         # All but the primary GPU wait here, so that only the primary process loads the
         # pre-trained model and the rest uses the cached version.
@@ -268,7 +272,7 @@ def run(gpu_id, options, distributed=False):
         # this makes it nicer to show the spinner until all of them are ready.
         if distributed:
             torch.distributed.barrier()
-        logger.end("Initialising", spinner=True, prefix=False)
+        spinner.stop()
 
         start_time = time.time()
         logger.set_prefix("Evaluation - {}".format(cp))
@@ -292,13 +296,12 @@ def run(gpu_id, options, distributed=False):
         evaluation_results = [
             OrderedDict(
                 name=result["name"],
-                loss=result["loss"],
-                perplexity=result["perplexity"],
+                stats=OrderedDict(loss=result["loss"], perplexity=result["perplexity"]),
             )
             for result in results
         ]
-        logger.log_epoch_stats(
-            evaluation_results, metrics, time_elapsed=time_difference, pad_prefix=False
+        log_epoch_stats(
+            logger, evaluation_results, metrics, time_elapsed=time_difference
         )
 
 
