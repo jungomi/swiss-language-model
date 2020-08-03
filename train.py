@@ -496,7 +496,6 @@ def run(gpu_id, options, distributed=False):
     model_kind = checkpoint["model"].get("kind") or options.model_kind
     use_special = True
     masked_lm = True
-    add_space = False
     if model_kind == "bert":
         if pre_trained is None:
             pre_trained = "bert-base-german-cased"
@@ -524,7 +523,6 @@ def run(gpu_id, options, distributed=False):
         tokeniser = GPT2Tokenizer.from_pretrained(pre_trained)
         masked_lm = False
         use_special = False
-        add_space = True
     elif model_kind == "gpt2-scratch":
         # The pre_trained here is only for the configuartion (num layers etc.)
         # But the weights are not loaded
@@ -540,7 +538,6 @@ def run(gpu_id, options, distributed=False):
         model = GPT2LMHeadModel(config)
         masked_lm = False
         use_special = False
-        add_space = True
     else:
         raise Exception("No model available for {}".format(model_kind))
     model = model.to(device)
@@ -550,9 +547,7 @@ def run(gpu_id, options, distributed=False):
     if distributed and gpu_id == 0:
         torch.distributed.barrier()
 
-    train_dataset = TextDataset(
-        options.train_text, tokeniser, use_special=use_special, add_space=add_space
-    )
+    train_dataset = TextDataset(options.train_text, tokeniser, use_special=use_special)
     train_sampler = (
         DistributedSampler(train_dataset, num_replicas=options.num_gpus, rank=gpu_id)
         if distributed
@@ -581,11 +576,7 @@ def run(gpu_id, options, distributed=False):
             name = None
             file_path = vals[0]
         validation_dataset = TextDataset(
-            file_path,
-            tokeniser,
-            name=name,
-            use_special=use_special,
-            add_space=add_space,
+            file_path, tokeniser, name=name, use_special=use_special,
         )
         validation_sampler = (
             DistributedSampler(
