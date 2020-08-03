@@ -97,9 +97,11 @@ class TextDataset(Dataset):
                 # add_prefix_space is not always supported, therefore it will only be
                 # added if it's actually.
                 encoded = (
-                    tokeniser.encode(line[0], add_prefix_space=add_space)
+                    tokeniser.encode(
+                        line[0], add_prefix_space=add_space, add_special_tokens=False
+                    )
                     if add_space
-                    else tokeniser.encode(line[0])
+                    else tokeniser.encode(line[0], add_special_tokens=False)
                 )
                 tokenised_ids.extend(encoded)
         self.text_blocks: List[List[int]] = []
