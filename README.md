@@ -21,39 +21,22 @@ pre-trained model available for that.
 - [PyTorch][pytorch]
 - [Huggingface/Transformers][huggingface-transformers]
 
-All dependencies can be installed with PIP.
+All dependencies can be installed with pip.
 
 ```sh
 pip install --user -r requirements.txt
 ```
 
+On *Windows* the PyTorch packages may not be available on PyPi, hence you need
+to point to the official PyTorch registry:
+
+```sh
+pip install --user -r requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
+```
+
 If you'd like to use a different installation method or another CUDA version
 with PyTorch follow the instructions on
 [PyTorch - Getting Started][pytorch-started].
-
-### Apex - Mixed Precision Training (Optional)
-
-Modern GPUs contain Tensor Cores (starting from V100 and RTX series) which
-enable mixed precision calculation, using optimised fp16 operations while still
-keeping the fp32 weights and therefore precision.
-
-*Other GPUs without Tensor Cores do not benefit from using mixed precision
-since they only do fp32 operations and you may find it even becoming slower.*
-
-[Apex][apex] needs to be installed to enable mixed precision training:
-
-```sh
-git clone https://github.com/NVIDIA/apex
-cd apex
-pip install -v --user --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
-```
-
-Then the `-O`/`--opt-level` can be set to use the different optimisation levels.
-
-- O0: No optimisations (fp32)
-- O1: Mixed precision (Recommended)
-- O2: Almost fp16 but still mixed precision
-- O3: Full fp16 (Almost guaranteed to lose accuracy)
 
 ## Models
 
@@ -99,12 +82,21 @@ python prepare_data.py -i data/swiss-crawl.csv -o swiss-crawl-converted --split 
 Training is done with the `train.py` script:
 
 ```sh
-python train.py --name some-name -c log/some-name/checkpoints/0022/ --train-text /path/to/text.tsv --validation-text /path/to/text.tsv
+python train.py --name some-name -c log/some-name/checkpoints/0022/ --train-text /path/to/text.tsv --validation-text /path/to/text.tsv --fp16
 ```
 
 The `--name` option is used to give it a name, otherwise the checkpoints are
 just numbered without any given name and `-c` is to resume from the given
 checkpoint, if not specified it starts fresh.
+
+Modern GPUs contain Tensor Cores (starting from V100 and RTX series) which
+enable mixed precision calculation, using optimised fp16 operations while still
+keeping the fp32 weights and therefore precision.
+
+It can be enabled by setting the `--fp16` flag.
+
+*Other GPUs without Tensor Cores do not benefit from using mixed precision
+since they only do fp32 operations and you may find it even becoming slower.*
 
 Different models can be selected with the `-m`/`--model` option, which are
 either `bert` or `gpt2`, to fine tune a pre-trained model, which can be changed
@@ -139,7 +131,6 @@ all of them, therefore it can be run with:
 tensorboard --logdir log
 ```
 
-[apex]: https://github.com/nvidia/apex
 [arxiv-bert]: https://arxiv.org/abs/1810.04805
 [bert-german]: https://deepset.ai/german-bert
 [bert-swiss-lm]: https://drive.google.com/open?id=1FBIIMO9C1Os-Er7DpL2G2DuUbsjWP2ts

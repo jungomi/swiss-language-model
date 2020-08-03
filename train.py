@@ -3,9 +3,10 @@ import multiprocessing
 import os
 import time
 from collections import OrderedDict
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
+import torch.cuda.amp as amp
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
@@ -26,14 +27,6 @@ from transformers import (
 
 from checkpoint import Logger, Noop, default_checkpoint, load_checkpoint, metrics
 from dataset import TextDataset, mask_tokens
-
-try:
-    from apex import amp
-
-    HAS_APEX = True
-except ImportError:
-    HAS_APEX = False
-
 
 batch_size = 1
 num_workers = multiprocessing.cpu_count()
@@ -56,7 +49,7 @@ def run_epoch(
     logger: Logger,
     epoch: int,
     train: bool = True,
-    mixed_precision: bool = False,
+    amp_scaler: Optional[amp.GradScaler] = None,
     masked_lm: bool = True,
     name: str = "",
 ) -> Dict:
@@ -84,27 +77,31 @@ def run_epoch(
         # The last batch may not be a full batch
         curr_batch_size = inputs.size(0)
 
-        output = (
-            model(inputs, masked_lm_labels=labels)
-            if masked_lm
-            else model(inputs, labels=labels)
-        )
+        # Automatically run it in mixed precision (FP16) if a scaler is given
+        with amp.autocast(enabled=amp_scaler is not None):
+            output = (
+                model(inputs, masked_lm_labels=labels)
+                if masked_lm
+                else model(inputs, labels=labels)
+            )
         loss = output[0]
         losses.append(loss.item())
         if torch.isnan(loss) or torch.isinf(loss):
             breakpoint()
         if train:
             optimiser.zero_grad()
-            if mixed_precision:
-                with amp.scale_loss(loss, optimiser) as scaled_loss:
-                    scaled_loss.backward()
-                # Clip gradients to avoid exploding gradients
-                nn.utils.clip_grad_norm_(amp.master_params(optimiser), max_norm=1.0)
-            else:
+            if amp_scaler is None:
                 loss.backward()
                 # Clip gradients to avoid exploding gradients
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimiser.step()
+                optimiser.step()
+            else:
+                amp_scaler.scale(loss).backward()
+                amp_scaler.unscale_(optimiser)
+                # Clip gradients to avoid exploding gradients
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                amp_scaler.step(optimiser)
+                amp_scaler.update()
 
         logger.progress_step(
             curr_batch_size
@@ -137,7 +134,7 @@ def train(
     checkpoint: Dict,
     num_epochs: int = num_epochs,
     model_kind: str = default_model,
-    mixed_precision: bool = False,
+    amp_scaler: Optional[amp.GradScaler] = None,
     masked_lm: bool = True,
 ):
     start_epoch = checkpoint["epoch"]
@@ -186,7 +183,7 @@ def train(
             train=True,
             name="Train",
             logger=logger,
-            mixed_precision=mixed_precision,
+            amp_scaler=amp_scaler,
             masked_lm=masked_lm,
         )
         train_stats["loss"].append(train_result["loss"])
@@ -208,7 +205,7 @@ def train(
                 train=False,
                 name=val_text,
                 logger=logger,
-                mixed_precision=mixed_precision,
+                amp_scaler=amp_scaler,
                 masked_lm=masked_lm,
             )
             validation_result["name"] = val_name
@@ -408,14 +405,10 @@ def parse_args() -> argparse.Namespace:
         help="Which kind of model to use [Default: {}]".format(default_model),
     )
     parser.add_argument(
-        "-O",
-        "--opt-level",
-        dest="opt_level",
-        choices=["0", "1", "2", "3"],
-        help=(
-            "Optimisation level for mixed precision training. "
-            "See https://nvidia.github.io/apex/amp.html for details."
-        ),
+        "--fp16",
+        dest="fp16",
+        action="store_true",
+        help="Enable mixed precision training (FP16)",
     )
     parser.add_argument(
         "--vocab",
@@ -625,13 +618,7 @@ def run(gpu_id, options, distributed=False):
         num_training_steps=options.num_epochs,
     )
 
-    if options.opt_level is not None:
-        assert (
-            HAS_APEX
-        ), "Mixed precision training requires Apex: https://www.github.com/nvidia/apex"
-        model, optimiser = amp.initialize(
-            model, optimiser, opt_level="O{}".format(options.opt_level), verbosity=0
-        )
+    amp_scaler = amp.GradScaler() if use_cuda and options.fp16 else None
 
     if distributed:
         model = DistributedDataParallel(
@@ -691,7 +678,7 @@ def run(gpu_id, options, distributed=False):
         num_epochs=options.num_epochs,
         checkpoint=checkpoint,
         model_kind=model_kind,
-        mixed_precision=options.opt_level is not None,
+        amp_scaler=amp_scaler,
         masked_lm=masked_lm,
     )
 
