@@ -18,10 +18,10 @@ from transformers import (
     BertConfig,
     BertForMaskedLM,
     BertTokenizer,
-    WarmupLinearSchedule,
     GPT2Config,
     GPT2LMHeadModel,
     GPT2Tokenizer,
+    get_linear_schedule_with_warmup,
 )
 
 from checkpoint import Logger, Noop, default_checkpoint, load_checkpoint, metrics
@@ -118,8 +118,7 @@ def run_epoch(
     # Gather the loss onto the primary process to have accurate metrics.
     if sampler is not None:
         gathered_losses = [
-            torch.zeros_like(loss)
-            for _ in range(sampler.num_replicas)  # type: ignore
+            torch.zeros_like(loss) for _ in range(sampler.num_replicas)  # type: ignore
         ]
         dist.all_gather(gathered_losses, loss)
         loss = torch.mean(torch.tensor(gathered_losses))
@@ -133,7 +132,7 @@ def train(
     optimiser: optim.Optimizer,  # type: ignore
     train_data_loader: DataLoader,
     validation_data_loaders: DataLoader,
-    lr_scheduler: WarmupLinearSchedule,
+    lr_scheduler: optim.lr_scheduler._LRScheduler,
     device: torch.device,
     checkpoint: Dict,
     num_epochs: int = num_epochs,
@@ -219,7 +218,7 @@ def train(
             val_stats["perplexity"].append(validation_result["perplexity"])
             logger.end(val_text)
 
-        epoch_lr = lr_scheduler.get_lr()[0]
+        epoch_lr = lr_scheduler.get_last_lr()[0]  # type: ignore
         lr_scheduler.step()
         train_result["lr"] = epoch_lr
         train_stats["lr"].append(epoch_lr)
@@ -620,8 +619,10 @@ def run(gpu_id, options, distributed=False):
         },
     ]
     optimiser = AdamW(optimiser_grouped_parameters, lr=initial_lr, eps=options.adam_eps)
-    lr_scheduler = WarmupLinearSchedule(
-        optimiser, warmup_steps=options.lr_warmup, t_total=options.num_epochs
+    lr_scheduler = get_linear_schedule_with_warmup(
+        optimiser,
+        num_warmup_steps=options.lr_warmup,
+        num_training_steps=options.num_epochs,
     )
 
     if options.opt_level is not None:

@@ -8,7 +8,10 @@ from transformers import PreTrainedTokenizer
 
 
 def mask_tokens(
-    tokens: torch.Tensor, tokeniser: PreTrainedTokenizer, prob: float = 0.15
+    tokens: torch.Tensor,
+    tokeniser: PreTrainedTokenizer,
+    prob: float = 0.15,
+    ignore_label: int = -100,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Prepares tokens for masked language modelling (MLM)
@@ -26,8 +29,8 @@ def mask_tokens(
     # Set the probabilities of the special tokens to 0.
     probability_matrix[special_tokens_mask] = 0.0
     mask_indices = torch.bernoulli(probability_matrix).to(torch.bool)
-    # Non-masked labels are not used for the loss, hence -1.
-    labels[~mask_indices] = -1
+    # Non-masked labels are not used for the loss
+    labels[~mask_indices] = ignore_label
     # 80% of the masked inputs are replaced with the Mask token.
     replace_indices = (
         torch.bernoulli(torch.full_like(labels, 0.8, dtype=torch.float)).to(torch.bool)
