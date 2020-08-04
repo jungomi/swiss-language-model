@@ -178,8 +178,8 @@ def main():
         spiece_processor.Load("{}.model".format(spiece_out))
         # Encode the whole text
         encoded = [
-            [" ".join(spiece_processor.EncodeAsPieces(l[0])).replace("▁", "Ġ")]
-            for l in lines
+            [" ".join(spiece_processor.EncodeAsPieces(line[0])).replace("▁", "Ġ")]
+            for line in lines
         ]
         tmp_encoded_fd, tmp_encoded_path = tempfile.mkstemp()
         tmp_bpe_fd, tmp_bpe_path = tempfile.mkstemp()

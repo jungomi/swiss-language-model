@@ -21,8 +21,8 @@ def mask_tokens(
     probability_matrix = torch.full_like(labels, prob, dtype=torch.float)
     special_tokens_mask = torch.tensor(
         [
-            tokeniser.get_special_tokens_mask(l, already_has_special_tokens=True)
-            for l in labels.tolist()
+            tokeniser.get_special_tokens_mask(label, already_has_special_tokens=True)
+            for label in labels.tolist()
         ],
         dtype=torch.bool,
     )
