@@ -3,7 +3,6 @@ typing==3.6.6
 halo==0.0.29
 tqdm==4.48.0
 transformers==3.0.2
-scikit-learn==0.21.3
-sentencepiece==0.1.83
-subword-nmt==0.3.6
+sentencepiece==0.1.91
+subword-nmt==0.3.7
 lavd==0.2.1
