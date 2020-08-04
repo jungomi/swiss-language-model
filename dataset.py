@@ -59,6 +59,7 @@ class TextDataset(Dataset):
         path: str,
         tokeniser: PreTrainedTokenizer,
         use_special: bool = True,
+        manual_special: bool = False,
         block_size: int = 512,
         name: Optional[str] = None,
     ):
@@ -66,10 +67,15 @@ class TextDataset(Dataset):
         Args:
             path (string): Path to fiel with the text
             tokeniser (PreTrainedTokenizer): Tokeniser used for the model.
-            use_special (bool, optional): Whether the tokeniser uses speical tokens.
+            use_special (bool): Whether the tokeniser uses speical tokens.
                 Mainly to avoid getting spammed by warnings.
                 [Default: True]
-            block_size (int, optional): Size of the blocks of text [Default: 512]
+            manual_special (bool): Whether to manually add special tokens to the start
+                and end of the sequence rather than using the tokeniser's specific
+                implementation. Needed when the XLNetTokenizer is used for the GPT-2
+                model.
+                [Default: False]
+            block_size (int): Size of the blocks of text [Default: 512]
             name (string, optional): Name of the dataset
                 [Default: Name of the ground truth file and its parent directory]
         """
@@ -83,20 +89,38 @@ class TextDataset(Dataset):
         else:
             self.name = name
 
+        if manual_special:
+            assert (
+                tokeniser.bos_token_id is not None
+                and tokeniser.eos_token_id is not None
+            ), (
+                "tokeniser must have set a bos_token and eos_token "
+                "when using manual_special=True"
+            )
+
         with open(path, "r") as fd:
             reader = csv.reader(
                 fd, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=""
             )
             tokenised_ids: List[int] = []
+            if manual_special:
+                tokenised_ids.append(tokeniser.eos_token_id)
+
             for line in reader:
                 encoded = tokeniser.encode(line[0], add_special_tokens=False)
                 tokenised_ids.extend(encoded)
+                if manual_special:
+                    tokenised_ids.append(tokeniser.eos_token_id)
         self.text_blocks: List[List[int]] = []
         # Group into blocks of text, discarding the last incomplete text.
         for i in range(0, len(tokenised_ids) - self.block_size + 1, self.block_size):
             token_block = tokenised_ids[i : i + self.block_size]
             if use_special:
-                token_block = tokeniser.build_inputs_with_special_tokens(token_block)
+                token_block = (
+                    [tokeniser.bos_token_id] + token_block + [tokeniser.eos_token_id]
+                    if manual_special
+                    else tokeniser.build_inputs_with_special_tokens(token_block)
+                )
             self.text_blocks.append(token_block)
 
     def __len__(self) -> int:

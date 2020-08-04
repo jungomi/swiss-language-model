@@ -22,6 +22,7 @@ from transformers import (
     GPT2Config,
     GPT2LMHeadModel,
     GPT2Tokenizer,
+    XLNetTokenizer,
     get_linear_schedule_with_warmup,
 )
 
@@ -413,7 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         dest="model_kind",
         default=default_model,
-        choices=["bert", "bert-scratch", "gpt2", "gpt2-scratch"],
+        choices=["bert", "bert-scratch", "gpt2", "gpt2-scratch", "gpt2-german"],
         help="Which kind of model to use [Default: {}]".format(default_model),
     )
     parser.add_argument(
@@ -510,8 +511,6 @@ def run(gpu_id, options, distributed=False):
         # Use either the provided vocabulary or the pre_trained one.
         vocab = options.vocab or pre_trained
         tokeniser = BertTokenizer.from_pretrained(vocab)
-        # The max len needs to be set manually if a custom vocab is loaded.
-        tokeniser.max_len_single_sentence = 510
         config = BertConfig.from_pretrained(pre_trained)
         config.vocab_size = tokeniser.vocab_size
         model = BertForMaskedLM(config)
@@ -523,6 +522,24 @@ def run(gpu_id, options, distributed=False):
         tokeniser = GPT2Tokenizer.from_pretrained(pre_trained)
         masked_lm = False
         use_special = False
+    elif model_kind == "gpt2-german":
+        assert pre_trained is not None, "--pre-trained must be given for gpt2-german"
+        config = GPT2Config.from_pretrained(pre_trained)
+        model = GPT2LMHeadModel.from_pretrained(pre_trained, config=config)
+        # Using the XLNetTokenizer because the pre-trained German GPT-2 model uses
+        # SentencePiece and that's easiest way to use it.
+        # That also means that the automatic tokenisation cannot be done, because XLNet
+        # uses different placing of the special tokens.
+        tokeniser = XLNetTokenizer.from_pretrained(
+            pre_trained,
+            keep_accents=True,
+            unk_token="<unk>",
+            # start and end of sequence use the same token
+            bos_token="<endoftext>",
+            eos_token="<endoftext>",
+        )
+        masked_lm = False
+        use_special = False
     elif model_kind == "gpt2-scratch":
         # The pre_trained here is only for the configuartion (num layers etc.)
         # But the weights are not loaded
@@ -531,8 +548,6 @@ def run(gpu_id, options, distributed=False):
         # Use either the provided vocabulary or the pre_trained one.
         vocab = options.vocab or pre_trained
         tokeniser = GPT2Tokenizer.from_pretrained(vocab)
-        # The max len needs to be set manually if a custom vocab is loaded.
-        tokeniser.max_len_single_sentence = 1024
         config = GPT2Config.from_pretrained(pre_trained)
         config.vocab_size = tokeniser.vocab_size
         model = GPT2LMHeadModel(config)
@@ -547,7 +562,12 @@ def run(gpu_id, options, distributed=False):
     if distributed and gpu_id == 0:
         torch.distributed.barrier()
 
-    train_dataset = TextDataset(options.train_text, tokeniser, use_special=use_special)
+    train_dataset = TextDataset(
+        options.train_text,
+        tokeniser,
+        use_special=use_special,
+        manual_special=model_kind == "gpt2-german",
+    )
     train_sampler = (
         DistributedSampler(train_dataset, num_replicas=options.num_gpus, rank=gpu_id)
         if distributed
@@ -576,7 +596,11 @@ def run(gpu_id, options, distributed=False):
             name = None
             file_path = vals[0]
         validation_dataset = TextDataset(
-            file_path, tokeniser, name=name, use_special=use_special,
+            file_path,
+            tokeniser,
+            name=name,
+            use_special=use_special,
+            manual_special=model_kind == "gpt2-german",
         )
         validation_sampler = (
             DistributedSampler(
