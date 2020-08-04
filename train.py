@@ -690,14 +690,18 @@ def run(gpu_id, options, distributed=False):
         epoch_results = [
             OrderedDict(
                 name="Train",
-                loss=checkpoint["train"]["stats"]["loss"][-1],
-                perplexity=checkpoint["train"]["stats"]["perplexity"][-1],
+                stats=OrderedDict(
+                    loss=checkpoint["train"]["stats"]["loss"][-1],
+                    perplexity=checkpoint["train"]["stats"]["perplexity"][-1],
+                ),
             )
         ] + [
             OrderedDict(
                 name=val_name,
-                loss=val_result["loss"]["stats"][-1],
-                perplexity=val_result["perplexity"]["stats"][-1],
+                stats=OrderedDict(
+                    loss=val_result["stats"]["loss"][-1],
+                    perplexity=val_result["stats"]["perplexity"][-1],
+                ),
             )
             for val_name, val_result in checkpoint["validation"].items()
         ]
