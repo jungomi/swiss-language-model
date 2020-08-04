@@ -1,5 +1,7 @@
 # Swiss Language Model
 
+![Python CI Badge](https://github.com/jungomi/swiss-language-model/workflows/Python/badge.svg)
+
 A language model for Swiss German based on
 [Huggingface/Transformers][huggingface-transformers].
 
